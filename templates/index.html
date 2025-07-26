@@ -256,6 +256,39 @@
             border-left: 5px solid #f44336;
             margin-top: 20px;
         }
+
+        .nav-section {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .nav-button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            margin: 0 10px;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        .nav-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .nav-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
         
         @media (max-width: 768px) {
             .header h1 {
@@ -291,7 +324,17 @@
             </ul>
         </div>
         
-        <div class="upload-section">
+        <div class="nav-section">
+            <h4 style="margin-bottom: 15px; color: #333;">📊 Quick Actions</h4>
+            <button class="nav-button" id="viewDatabaseBtn" onclick="loadDatabaseAnalysis()">
+                📈 View Complete Trading Analysis
+            </button>
+            <button class="nav-button" onclick="showUploadSection()" style="background: linear-gradient(45deg, #28a745, #20c997);">
+                📁 Upload New Data
+            </button>
+        </div>
+        
+        <div class="upload-section" id="uploadSection">
             <div class="upload-area" id="uploadArea">
                 <div class="upload-icon">📈</div>
                 <div class="upload-text">
@@ -311,14 +354,17 @@
         </div>
         
         <div class="results" id="results">
-            <h2>📊 Analysis Results</h2>
+            <h2>📊 Cumulative Trading Analysis</h2>
+            <p style="text-align: center; color: #666; margin-bottom: 20px;">
+                <em>Showing comprehensive analysis across all uploaded trading data</em>
+            </p>
             
             <div class="metrics-grid" id="metricsGrid">
                 <!-- Metrics will be populated by JavaScript -->
             </div>
             
             <div class="strategy-section">
-                <h3>Strategy Performance Breakdown</h3>
+                <h3>📈 Strategy Performance Breakdown <span style="font-size: 0.8em; color: #666; font-weight: normal;">(Cumulative Data)</span></h3>
                 <table class="strategy-table" id="strategyTable">
                     <thead>
                         <tr>
@@ -414,7 +460,7 @@
             }
         }
         
-        function displayResults(data) {
+        function displayResults(data, isDatabaseView = false) {
             const metrics = data.metrics;
             const plots = data.plots;
             
@@ -428,14 +474,55 @@
             if (data.new_trades !== undefined || data.updated_trades !== undefined || data.duplicate_trades !== undefined) {
                 const mergeInfo = document.createElement('div');
                 mergeInfo.className = 'info-section merge-info';
+                
+                let uploadMessage = '';
+                if (isDatabaseView) {
+                    uploadMessage = `📊 Displaying complete analysis of all trading data in your database`;
+                } else if (data.new_trades > 0) {
+                    uploadMessage = `✅ Successfully added ${data.new_trades} new trade${data.new_trades === 1 ? '' : 's'} to your database!`;
+                } else if (data.updated_trades > 0) {
+                    uploadMessage = `🔄 Updated ${data.updated_trades} existing trade${data.updated_trades === 1 ? '' : 's'} with latest data.`;
+                } else {
+                    uploadMessage = `ℹ️ No new trades found in this upload.`;
+                }
+                
+                let cardsHtml = '';
+                if (!isDatabaseView) {
+                    cardsHtml = `
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 15px;">
+                            <div style="text-align: center; padding: 10px; background: #e8f5e8; border-radius: 8px;">
+                                <div style="font-size: 1.5em; font-weight: bold; color: #27ae60;">${data.new_trades || 0}</div>
+                                <div style="font-size: 0.9em; color: #666;">New</div>
+                            </div>
+                            <div style="text-align: center; padding: 10px; background: #fff3cd; border-radius: 8px;">
+                                <div style="font-size: 1.5em; font-weight: bold; color: #f39c12;">${data.updated_trades || 0}</div>
+                                <div style="font-size: 0.9em; color: #666;">Updated</div>
+                            </div>
+                            <div style="text-align: center; padding: 10px; background: #f8d7da; border-radius: 8px;">
+                                <div style="font-size: 1.5em; font-weight: bold; color: #dc3545;">${data.duplicate_trades || 0}</div>
+                                <div style="font-size: 0.9em; color: #666;">Skipped</div>
+                            </div>
+                            <div style="text-align: center; padding: 10px; background: #d1ecf1; border-radius: 8px;">
+                                <div style="font-size: 1.5em; font-weight: bold; color: #17a2b8;">${data.total_trades || 0}</div>
+                                <div style="font-size: 0.9em; color: #666;">Total in DB</div>
+                            </div>
+                        </div>`;
+                } else {
+                    cardsHtml = `
+                        <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px; color: white; margin-top: 15px;">
+                            <div style="font-size: 2.5em; font-weight: bold; margin-bottom: 10px;">${data.total_trades || 0}</div>
+                            <div style="font-size: 1.2em;">Total Trades in Database</div>
+                            <div style="font-size: 1em; margin-top: 5px; opacity: 0.9;">Date Range: ${data.date_range || 'N/A'}</div>
+                        </div>`;
+                }
+                
                 mergeInfo.innerHTML = `
-                    <h4>📊 Data Merge Summary:</h4>
-                    <ul>
-                        <li><strong>New trades added:</strong> ${data.new_trades || 0}</li>
-                        <li><strong>Existing trades updated:</strong> ${data.updated_trades || 0}</li>
-                        <li><strong>Duplicate trades skipped:</strong> ${data.duplicate_trades || 0}</li>
-                        <li><strong>Total trades in database:</strong> ${data.total_trades || 0}</li>
-                    </ul>
+                    <h4>${isDatabaseView ? '📊 Database Analysis:' : `📊 Upload Results for "${data.filename || 'file'}":`}</h4>
+                    <p style="font-size: 1.1em; color: #2c3e50; margin-bottom: 10px;">${uploadMessage}</p>
+                    ${cardsHtml}
+                    <p style="margin-top: 15px; font-style: italic; color: #666; text-align: center;">
+                        📈 Analysis below includes ALL trades from your complete trading history
+                    </p>
                 `;
                 
                 // Insert before the metrics grid
@@ -443,8 +530,22 @@
                 metricsGrid.parentNode.insertBefore(mergeInfo, metricsGrid);
             }
             
-            // Display key metrics
+            // Add header for metrics section
+            const metricsContainer = document.getElementById('metricsGrid').parentNode;
+            let existingHeader = metricsContainer.querySelector('.metrics-header');
+            if (existingHeader) {
+                existingHeader.remove();
+            }
+            
+            const metricsHeader = document.createElement('h3');
+            metricsHeader.className = 'metrics-header';
+            metricsHeader.style.cssText = 'text-align: center; color: #333; margin: 20px 0 15px 0; border-bottom: 2px solid #667eea; padding-bottom: 10px;';
+            metricsHeader.innerHTML = '📊 Overall Performance Metrics <span style="font-size: 0.8em; color: #666; font-weight: normal;">(All Trading Data)</span>';
+            
             const metricsGrid = document.getElementById('metricsGrid');
+            metricsGrid.parentNode.insertBefore(metricsHeader, metricsGrid);
+            
+            // Display key metrics
             metricsGrid.innerHTML = `
                 <div class="metric-card">
                     <div class="metric-value ${metrics.total_pnl >= 0 ? 'metric-positive' : 'metric-negative'}">
@@ -526,7 +627,7 @@
             
             // Display charts
             const chartsSection = document.getElementById('chartsSection');
-            let chartsHtml = '';
+            let chartsHtml = '<h3 style="text-align: center; color: #333; margin-bottom: 20px; border-bottom: 2px solid #667eea; padding-bottom: 10px;">📊 Visual Analysis <span style="font-size: 0.8em; color: #666; font-weight: normal;">(All Trading Data)</span></h3>';
             
             plots.forEach((plotFile, index) => {
                 const titles = [
@@ -566,6 +667,53 @@
         
         function hideError() {
             error.style.display = 'none';
+        }
+
+        async function loadDatabaseAnalysis() {
+            hideError();
+            showLoading();
+            
+            const button = document.getElementById('viewDatabaseBtn');
+            button.disabled = true;
+            button.textContent = '📊 Loading Analysis...';
+            
+            try {
+                const response = await fetch('/database-analysis');
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Modify data to show it's from database
+                    data.filename = 'Complete Database';
+                    data.new_trades = 0;
+                    data.updated_trades = 0;
+                    data.duplicate_trades = 0;
+                    
+                    displayResults(data, true); // Pass true to indicate this is database view
+                } else {
+                    showError(`Error: ${data.detail || 'Unknown error occurred'}`);
+                }
+            } catch (err) {
+                if (err.message.includes('404')) {
+                    showError('No trading data found in database. Please upload a CSV file first.');
+                } else {
+                    showError(`Network error: ${err.message}`);
+                }
+            } finally {
+                hideLoading();
+                button.disabled = false;
+                button.textContent = '📈 View Complete Trading Analysis';
+            }
+        }
+
+        function showUploadSection() {
+            const uploadSection = document.getElementById('uploadSection');
+            const results = document.getElementById('results');
+            
+            uploadSection.style.display = 'block';
+            results.style.display = 'none';
+            
+            // Scroll to upload section
+            uploadSection.scrollIntoView({ behavior: 'smooth' });
         }
     </script>
 </body>

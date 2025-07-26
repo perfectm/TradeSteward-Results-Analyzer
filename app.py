@@ -4,6 +4,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # Use non-GUI backend
 import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime, timedelta
@@ -599,13 +601,20 @@ class TradeStewardAnalyzer:
         ax1.axvline(x=0, color='red', linestyle='--', alpha=0.5)
         ax1.grid(True, alpha=0.3)
         
-        # VIX vs P&L
-        ax2.scatter(self.data['VIXOpenQuote'], self.data['TotalNetProfitLoss'], 
-                   alpha=0.6, color='orange')
-        ax2.set_title('VIX vs Trade P&L', fontsize=14, fontweight='bold')
+        # VIX vs P&L (colored by strategy)
+        strategies = self.data['Strategy'].unique()
+        colors = plt.cm.Set1(np.linspace(0, 1, len(strategies)))
+        
+        for i, strategy in enumerate(strategies):
+            strategy_data = self.data[self.data['Strategy'] == strategy]
+            ax2.scatter(strategy_data['VIXOpenQuote'], strategy_data['TotalNetProfitLoss'], 
+                       alpha=0.7, color=colors[i], label=strategy, s=30)
+        
+        ax2.set_title('VIX vs Trade P&L (by Strategy)', fontsize=14, fontweight='bold')
         ax2.set_xlabel('VIX at Open', fontsize=12)
         ax2.set_ylabel('Trade P&L ($)', fontsize=12)
         ax2.grid(True, alpha=0.3)
+        ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         
         # Monthly Performance
         self.data['YearMonth'] = self.data['OpenDate'].dt.to_period('M')
@@ -675,7 +684,14 @@ async def upload_file(file: UploadFile = File(...)):
             "filename": file.filename,
             "summary": result,
             "metrics": analyzer.metrics,
-            "plots": plot_files
+            "plots": plot_files,
+            # Add merge statistics at top level for frontend
+            "total_trades": result.get("total_trades", 0),
+            "new_trades": result.get("new_trades", 0),
+            "updated_trades": result.get("updated_trades", 0),
+            "duplicate_trades": result.get("duplicate_trades", 0),
+            "date_range": result.get("date_range", "N/A"),
+            "total_pnl": result.get("total_pnl", 0.0)
         }
         
         return response
@@ -691,6 +707,43 @@ async def get_metrics():
         raise HTTPException(status_code=404, detail="No data loaded. Please upload a file first.")
     
     return analyzer.metrics
+
+@app.get("/database-analysis")
+async def get_database_analysis():
+    """Get complete analysis of all data in the database"""
+    try:
+        # Check if there's data in the database
+        total_trades = analyzer.db.get_trade_count()
+        if total_trades == 0:
+            raise HTTPException(status_code=404, detail="No trading data found in database. Please upload a CSV file first.")
+        
+        # Reload data from database (in case there were any changes)
+        analyzer._load_from_database()
+        
+        if analyzer.data is None or analyzer.data.empty:
+            raise HTTPException(status_code=404, detail="No valid trading data found in database.")
+        
+        # Generate plots
+        plot_files = analyzer.generate_plots()
+        
+        # Prepare response similar to upload but without merge statistics
+        response = {
+            "success": True,
+            "source": "database",
+            "metrics": analyzer.metrics,
+            "plots": plot_files,
+            "total_trades": len(analyzer.data),
+            "date_range": f"{analyzer.data['OpenDate'].min().strftime('%Y-%m-%d')} to {analyzer.data['FinalTradeClosedDate'].max().strftime('%Y-%m-%d')}",
+            "total_pnl": float(analyzer.data['TotalNetProfitLoss'].sum())
+        }
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error getting database analysis", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error retrieving database analysis: {str(e)}")
 
 @app.get("/analyze")
 async def analyze_fixed_csv():
