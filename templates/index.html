@@ -1584,6 +1584,10 @@
                     console.log('🎯 About to call displayResults with:', data);
                     displayResults(data, true); // Pass true to indicate this is database view
                     console.log('✅ displayResults completed');
+                    
+                    // Hide upload section when viewing complete trading analysis
+                    console.log('📤 Hiding upload section after loading complete analysis');
+                    document.getElementById('uploadSection').classList.add('hidden');
                 } else {
                     console.log('❌ API returned success=false');
                     showError(`Error: ${data.detail || 'Unknown error occurred'}`);
@@ -1612,8 +1616,12 @@
             isDailyViewActive = false;
             stopDailyViewProtection();
             
+            // Show upload section by removing hidden class and setting display
+            uploadSection.classList.remove('hidden');
             uploadSection.style.display = 'block';
             results.style.display = 'none';
+            
+            console.log('📤 Upload section shown - user can upload new data');
             
             // Scroll to upload section
             uploadSection.scrollIntoView({ behavior: 'smooth' });
