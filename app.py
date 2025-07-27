@@ -71,6 +71,11 @@ class DateRangeRequest(BaseModel):
     start_date: str
     end_date: str
 
+class PasswordResetRequest(BaseModel):
+    username: str
+    current_password: str
+    new_password: str
+
 def clean_csv_content(raw_csv_content: str) -> str:
     """Clean CSV content to handle malformed rows and formatting issues"""
     try:
@@ -275,6 +280,28 @@ class TradeDatabase:
                     created_at=row['created_at']
                 )
             return None
+    
+    def update_user_password(self, user_id: int, new_hashed_password: str) -> bool:
+        """Update user password"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE users 
+                    SET hashed_password = ?
+                    WHERE user_id = ? AND is_active = TRUE
+                ''', (new_hashed_password, user_id))
+                conn.commit()
+                
+                if cursor.rowcount > 0:
+                    logger.info(f"Updated password for user ID: {user_id}")
+                    return True
+                else:
+                    logger.warning(f"No user found with ID: {user_id}")
+                    return False
+        except Exception as e:
+            logger.error(f"Error updating password for user {user_id}: {e}")
+            return False
     
     def insert_trades(self, df: pd.DataFrame, user_id: int) -> Tuple[int, int, int]:
         """
@@ -1419,6 +1446,154 @@ async def get_current_user_info(current_user: User = Depends(require_user)):
         "email": current_user.email,
         "created_at": current_user.created_at
     }
+
+@app.post("/reset-password")
+async def reset_password(
+    username: str = Form(...),
+    current_password: str = Form(...), 
+    new_password: str = Form(...),
+    current_user: User = Depends(require_user)
+):
+    """Reset user password"""
+    try:
+        # Verify the username matches the authenticated user
+        if username != current_user.username:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only reset your own password"
+            )
+        
+        # Verify current password
+        if not verify_password(current_password, current_user.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Current password is incorrect"
+            )
+        
+        # Validate new password
+        if len(new_password) < 6:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="New password must be at least 6 characters long"
+            )
+        
+        # Check if new password is different from current password
+        if verify_password(new_password, current_user.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="New password must be different from current password"
+            )
+        
+        # Hash new password and update in database
+        new_hashed_password = get_password_hash(new_password)
+        success = db.update_user_password(current_user.user_id, new_hashed_password)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update password"
+            )
+        
+        logger.info(f"Password reset successful for user: {username}")
+        
+        return {
+            "success": True,
+            "message": "Password reset successfully",
+            "username": username
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error during password reset for {username}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred during password reset"
+        )
+
+@app.post("/forgot-password")
+async def forgot_password(username: str = Form(...)):
+    """Initiate forgot password process for unauthenticated users"""
+    try:
+        # Check if user exists
+        user = db.get_user_by_username(username)
+        if not user:
+            # For security, don't reveal if username exists or not
+            return {
+                "success": True,
+                "message": "If the username exists, password reset has been initiated"
+            }
+        
+        logger.info(f"Forgot password initiated for user: {username}")
+        
+        # In a real application, you would:
+        # 1. Generate a secure reset token
+        # 2. Store it in the database with expiration
+        # 3. Send it via email
+        # For this demo, we'll allow immediate password reset
+        
+        return {
+            "success": True,
+            "message": "Password reset initiated",
+            "username": username,
+            "allow_reset": True  # This would normally be sent via email
+        }
+        
+    except Exception as e:
+        logger.error(f"Error during forgot password for {username}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred during password reset initiation"
+        )
+
+@app.post("/update-forgotten-password")
+async def update_forgotten_password(
+    username: str = Form(...),
+    new_password: str = Form(...)
+):
+    """Update password for users who forgot their password (no authentication required)"""
+    try:
+        # Validate new password
+        if len(new_password) < 6:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password must be at least 6 characters long"
+            )
+        
+        # Check if user exists
+        user = db.get_user_by_username(username)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Hash new password and update in database
+        new_hashed_password = get_password_hash(new_password)
+        success = db.update_user_password(user.user_id, new_hashed_password)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update password"
+            )
+        
+        logger.info(f"Forgotten password reset successful for user: {username}")
+        
+        return {
+            "success": True,
+            "message": "Password updated successfully",
+            "username": username
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error during forgotten password update for {username}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred during password update"
+        )
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):

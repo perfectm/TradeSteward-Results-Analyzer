@@ -478,6 +478,11 @@
                     <input type="password" name="password" placeholder="Password" required>
                     <button type="submit" class="auth-button">Login</button>
                 </form>
+                <div style="text-align: center; margin-top: 15px;">
+                    <a href="#" onclick="showForgotPassword()" style="color: #667eea; text-decoration: none; font-size: 0.9rem;">
+                        🔑 Forgot your password?
+                    </a>
+                </div>
             </div>
             
             <div class="auth-form hidden" id="registerForm">
@@ -489,13 +494,148 @@
                     <button type="submit" class="auth-button">Register</button>
                 </form>
             </div>
+            
+            <div class="auth-form hidden" id="forgotPasswordForm">
+                <h3>Reset Your Password</h3>
+                <p style="text-align: center; color: #666; margin-bottom: 20px; font-size: 0.9rem;">
+                    Enter your username to reset your password
+                </p>
+                <form onsubmit="handleForgotPassword(event)">
+                    <input type="text" name="username" placeholder="Username" required>
+                    <button type="submit" class="auth-button">Reset Password</button>
+                </form>
+                <div style="text-align: center; margin-top: 15px;">
+                    <a href="#" onclick="showLogin()" style="color: #667eea; text-decoration: none; font-size: 0.9rem;">
+                        ← Back to Login
+                    </a>
+                </div>
+            </div>
+            
+            <div class="auth-form hidden" id="newPasswordForm">
+                <h3>Set New Password</h3>
+                <p style="text-align: center; color: #666; margin-bottom: 20px; font-size: 0.9rem;">
+                    Enter your new password
+                </p>
+                <form onsubmit="handleNewPassword(event)">
+                    <input type="hidden" name="username" id="resetUsernameHidden">
+                    <input type="password" name="new_password" placeholder="New Password (min 6 characters)" required minlength="6">
+                    <input type="password" name="confirm_password" placeholder="Confirm New Password" required minlength="6">
+                    <button type="submit" class="auth-button">Update Password</button>
+                </form>
+                <div style="text-align: center; margin-top: 15px;">
+                    <a href="#" onclick="showLogin()" style="color: #667eea; text-decoration: none; font-size: 0.9rem;">
+                        ← Back to Login
+                    </a>
+                </div>
+            </div>
         </div>
 
         <!-- User Info Section -->
         <div class="user-section hidden" id="userSection">
             <div class="user-info">
                 <span id="userWelcome">Welcome, <strong id="username"></strong>!</span>
-                <button class="logout-button" onclick="logout()">Logout</button>
+                <div>
+                    <button class="reset-password-button" onclick="showPasswordReset()" style="background: #007bff; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.9rem; margin-right: 10px;">
+                        🔑 Reset Password
+                    </button>
+                    <button class="logout-button" onclick="logout()">Logout</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Password Reset Modal -->
+        <div class="password-reset-modal hidden" id="passwordResetModal" onclick="handleModalClick(event)" style="
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        ">
+            <div style="
+                background: white;
+                border-radius: 15px;
+                padding: 30px;
+                max-width: 400px;
+                width: 90%;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            ">
+                <h3 style="text-align: center; color: #333; margin-bottom: 20px;">🔑 Reset Password</h3>
+                
+                <form onsubmit="handlePasswordReset(event)">
+                    <input type="text" name="username" id="resetUsername" placeholder="Username" required style="
+                        width: 100%;
+                        padding: 12px;
+                        margin-bottom: 15px;
+                        border: 1px solid #ddd;
+                        border-radius: 8px;
+                        font-size: 1rem;
+                        box-sizing: border-box;
+                    ">
+                    
+                    <input type="password" name="current_password" placeholder="Current Password" required style="
+                        width: 100%;
+                        padding: 12px;
+                        margin-bottom: 15px;
+                        border: 1px solid #ddd;
+                        border-radius: 8px;
+                        font-size: 1rem;
+                        box-sizing: border-box;
+                    ">
+                    
+                    <input type="password" name="new_password" placeholder="New Password (min 6 characters)" required minlength="6" style="
+                        width: 100%;
+                        padding: 12px;
+                        margin-bottom: 15px;
+                        border: 1px solid #ddd;
+                        border-radius: 8px;
+                        font-size: 1rem;
+                        box-sizing: border-box;
+                    ">
+                    
+                    <input type="password" name="confirm_password" placeholder="Confirm New Password" required minlength="6" style="
+                        width: 100%;
+                        padding: 12px;
+                        margin-bottom: 20px;
+                        border: 1px solid #ddd;
+                        border-radius: 8px;
+                        font-size: 1rem;
+                        box-sizing: border-box;
+                    ">
+                    
+                    <div style="display: flex; gap: 10px;">
+                        <button type="submit" style="
+                            flex: 1;
+                            background: linear-gradient(45deg, #667eea, #764ba2);
+                            color: white;
+                            border: none;
+                            padding: 12px;
+                            border-radius: 8px;
+                            cursor: pointer;
+                            font-size: 1rem;
+                            transition: transform 0.2s ease;
+                        " onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+                            Reset Password
+                        </button>
+                        
+                        <button type="button" onclick="hidePasswordReset()" style="
+                            flex: 1;
+                            background: #6c757d;
+                            color: white;
+                            border: none;
+                            padding: 12px;
+                            border-radius: 8px;
+                            cursor: pointer;
+                            font-size: 1rem;
+                        ">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
 
@@ -718,6 +858,8 @@
             document.querySelector('.auth-tab').classList.add('active');
             document.getElementById('loginForm').classList.remove('hidden');
             document.getElementById('registerForm').classList.add('hidden');
+            document.getElementById('forgotPasswordForm').classList.add('hidden');
+            document.getElementById('newPasswordForm').classList.add('hidden');
         }
         
         function showRegister() {
@@ -725,6 +867,100 @@
             document.querySelectorAll('.auth-tab')[1].classList.add('active');
             document.getElementById('loginForm').classList.add('hidden');
             document.getElementById('registerForm').classList.remove('hidden');
+            document.getElementById('forgotPasswordForm').classList.add('hidden');
+            document.getElementById('newPasswordForm').classList.add('hidden');
+        }
+        
+        function showForgotPassword() {
+            document.getElementById('loginForm').classList.add('hidden');
+            document.getElementById('registerForm').classList.add('hidden');
+            document.getElementById('forgotPasswordForm').classList.remove('hidden');
+            document.getElementById('newPasswordForm').classList.add('hidden');
+        }
+        
+        async function handleForgotPassword(event) {
+            event.preventDefault();
+            const formData = new FormData(event.target);
+            const username = formData.get('username');
+            
+            try {
+                showLoading();
+                const response = await fetch('/forgot-password', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    if (result.allow_reset) {
+                        // Store username for the next form
+                        document.getElementById('resetUsernameHidden').value = username;
+                        
+                        // Show new password form
+                        document.getElementById('forgotPasswordForm').classList.add('hidden');
+                        document.getElementById('newPasswordForm').classList.remove('hidden');
+                        hideLoading();
+                        
+                        showMessage(result.message + ". Please enter your new password below.", 'success');
+                    } else {
+                        hideLoading();
+                        showMessage(result.message, 'success');
+                    }
+                } else {
+                    hideLoading();
+                    showError(result.detail || 'Failed to initiate password reset');
+                }
+            } catch (error) {
+                hideLoading();
+                showError('Network error during password reset initiation');
+            }
+        }
+        
+        async function handleNewPassword(event) {
+            event.preventDefault();
+            const formData = new FormData(event.target);
+            const username = formData.get('username');
+            const newPassword = formData.get('new_password');
+            const confirmPassword = formData.get('confirm_password');
+            
+            // Validate passwords match
+            if (newPassword !== confirmPassword) {
+                showError('Passwords do not match');
+                return;
+            }
+            
+            try {
+                showLoading();
+                
+                const resetData = new FormData();
+                resetData.append('username', username);
+                resetData.append('new_password', newPassword);
+                
+                const response = await fetch('/update-forgotten-password', {
+                    method: 'POST',
+                    body: resetData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    hideLoading();
+                    showMessage('Password updated successfully! You can now login with your new password.', 'success');
+                    
+                    // Clear form and go back to login
+                    event.target.reset();
+                    setTimeout(() => {
+                        showLogin();
+                    }, 2000);
+                } else {
+                    hideLoading();
+                    showError(result.detail || 'Failed to update password');
+                }
+            } catch (error) {
+                hideLoading();
+                showError('Network error during password update');
+            }
         }
         
         function showAuthSection() {
@@ -829,6 +1065,96 @@
             localStorage.removeItem('currentUser');
             showAuthSection();
             hideError();
+        }
+        
+        // Password reset functions
+        function showPasswordReset() {
+            const modal = document.getElementById('passwordResetModal');
+            const usernameField = document.getElementById('resetUsername');
+            
+            // Pre-fill the username
+            if (currentUser && currentUser.username) {
+                usernameField.value = currentUser.username;
+            }
+            
+            modal.classList.remove('hidden');
+            modal.style.display = 'flex';
+        }
+        
+        function hidePasswordReset() {
+            const modal = document.getElementById('passwordResetModal');
+            modal.classList.add('hidden');
+            modal.style.display = 'none';
+            
+            // Clear form
+            const form = modal.querySelector('form');
+            form.reset();
+            
+            // Re-fill username
+            if (currentUser && currentUser.username) {
+                document.getElementById('resetUsername').value = currentUser.username;
+            }
+        }
+        
+        async function handlePasswordReset(event) {
+            event.preventDefault();
+            const formData = new FormData(event.target);
+            
+            // Client-side validation
+            const newPassword = formData.get('new_password');
+            const confirmPassword = formData.get('confirm_password');
+            
+            if (newPassword !== confirmPassword) {
+                showError('New passwords do not match');
+                return;
+            }
+            
+            if (newPassword.length < 6) {
+                showError('New password must be at least 6 characters long');
+                return;
+            }
+            
+            // Disable submit button
+            const submitBtn = event.target.querySelector('button[type="submit"]');
+            const originalText = submitBtn.textContent;
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Resetting...';
+            
+            try {
+                const response = await fetch('/reset-password', {
+                    method: 'POST',
+                    body: formData,
+                    headers: getAuthHeaders()
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    hidePasswordReset();
+                    hideError();
+                    
+                    // Show success message
+                    alert('✅ Password reset successfully!\n\nYour password has been updated. You will need to log in again with your new password.');
+                    
+                    // Log out user to force re-authentication with new password
+                    logout();
+                } else {
+                    showError(data.detail || 'Password reset failed');
+                }
+            } catch (err) {
+                showError('Network error during password reset. Please try again.');
+            } finally {
+                // Re-enable submit button
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalText;
+            }
+        }
+        
+        // Handle modal click to close when clicking outside
+        function handleModalClick(event) {
+            if (event.target.id === 'passwordResetModal') {
+                hidePasswordReset();
+            }
         }
         
         // Update API calls to include authorization header
