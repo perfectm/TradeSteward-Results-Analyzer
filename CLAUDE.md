@@ -21,25 +21,35 @@ python test_analyzer.py
 ```
 This runs the test script which analyzes a sample TradeSteward CSV file.
 
+```bash
+python test_forgot_password.py
+```
+This tests the forgot password functionality for unauthenticated users.
+
 ## Architecture Overview
 
 This is a Python FastAPI web application for analyzing TradeSteward options trading performance logs. The architecture consists of:
 
 ### Core Components
-- **`app.py`**: Main FastAPI application containing the `TradeStewardAnalyzer` class
+- **`app.py`**: Main FastAPI application containing the `TradeStewardAnalyzer` class and authentication system
 - **`TradeStewardAnalyzer`**: Core analysis engine that processes CSV data and generates metrics/visualizations
-- **`templates/index.html`**: Frontend dashboard with drag-and-drop file upload
+- **`templates/index.html`**: Frontend dashboard with authentication, drag-and-drop file upload, and daily performance analysis
 - **`static/`**: CSS and JavaScript files for the web interface
 - **`uploads/plots/`**: Auto-generated directory for chart storage
+- **SQLite Database**: User authentication and trade data storage with account-based privacy protection
 
 ### Data Processing Pipeline
-1. **CSV Cleaning**: `clean_csv_content()` function handles malformed TradeSteward CSV exports
-2. **Data Analysis**: Pandas-based processing of multi-leg options trading data
-3. **Metrics Calculation**: Comprehensive financial metrics (Sharpe ratio, drawdown, win rate, etc.)
-4. **Visualization**: Matplotlib/Seaborn chart generation with three main chart sets:
+1. **Authentication**: JWT-based user authentication with bcrypt password hashing
+2. **CSV Upload**: User-specific file uploads with data validation and deduplication
+3. **CSV Cleaning**: `clean_csv_content()` function handles malformed TradeSteward CSV exports
+4. **Data Analysis**: Pandas-based processing of multi-leg options trading data with account privacy protection
+5. **Metrics Calculation**: Comprehensive financial metrics (Sharpe ratio, UPI, drawdown, win rate, etc.)
+6. **Visualization**: Matplotlib/Seaborn chart generation with four main chart sets:
    - Cumulative and daily P&L performance
-   - Strategy analysis with trade counts
+   - Strategy analysis with trade counts  
    - Risk analysis including VIX correlation and drawdown timeline
+   - Commission analysis with account-based filtering
+7. **Daily Analysis**: Interactive daily performance breakdown with persistent view protection
 
 ### Key Data Structure
 The analyzer expects TradeSteward CSV files with specific columns:
@@ -50,8 +60,20 @@ The analyzer expects TradeSteward CSV files with specific columns:
 - Timestamp data: `OpenDate`, `OpenTime`, `FinalTradeClosedDate`
 
 ### API Endpoints
+
+#### Authentication Endpoints
+- **POST `/register`**: User registration with username, email, and password
+- **POST `/login`**: User authentication with JWT token generation
+- **POST `/logout`**: User logout (frontend-only token clearing)
+- **POST `/forgot-password`**: Initiate password reset for unauthenticated users
+- **POST `/update-forgotten-password`**: Update password without current authentication
+- **POST `/reset-password`**: Reset password for authenticated users (requires current password)
+
+#### Analysis Endpoints
 - **GET `/`**: Serves the main dashboard interface
-- **POST `/analyze`**: Accepts CSV upload and returns analysis results
+- **POST `/upload`**: Accepts CSV upload and stores trade data (authenticated)
+- **GET `/database-analysis`**: Retrieves analysis from stored trade data (authenticated)
+- **GET `/daily-analysis`**: Provides daily performance breakdown (authenticated)
 - **GET `/plots/{filename}`**: Serves generated chart images
 
 ### Testing

@@ -902,10 +902,10 @@
                         document.getElementById('newPasswordForm').classList.remove('hidden');
                         hideLoading();
                         
-                        showMessage(result.message + ". Please enter your new password below.", 'success');
+                        alert(result.message + ". Please enter your new password below.");
                     } else {
                         hideLoading();
-                        showMessage(result.message, 'success');
+                        alert(result.message);
                     }
                 } else {
                     hideLoading();
@@ -946,7 +946,7 @@
                 
                 if (response.ok && result.success) {
                     hideLoading();
-                    showMessage('Password updated successfully! You can now login with your new password.', 'success');
+                    alert('Password updated successfully! You can now login with your new password.');
                     
                     // Clear form and go back to login
                     event.target.reset();
