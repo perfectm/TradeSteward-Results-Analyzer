@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import pandas as pd
 import numpy as np
 import matplotlib
@@ -63,6 +63,9 @@ class UserLogin:
 
 class StrategyFilterRequest(BaseModel):
     strategies: List[str]
+
+class AccountFilterRequest(BaseModel):
+    account_num: Optional[str] = None
 
 def clean_csv_content(raw_csv_content: str) -> str:
     """Clean CSV content to handle malformed rows and formatting issues"""
@@ -403,6 +406,26 @@ class TradeDatabase:
             cursor = conn.cursor()
             cursor.execute('SELECT COUNT(*) FROM trades WHERE user_id = ?', (user_id,))
             return cursor.fetchone()[0]
+    
+    def get_user_accounts(self, user_id: int) -> List[dict]:
+        """Get all accounts for a specific user with trade counts"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT account_num, COUNT(*) as trade_count
+                FROM trades 
+                WHERE user_id = ? AND account_num IS NOT NULL
+                GROUP BY account_num
+                ORDER BY account_num
+            ''', (user_id,))
+            
+            accounts = []
+            for row in cursor.fetchall():
+                accounts.append({
+                    'account_num': row['account_num'],
+                    'trade_count': row['trade_count']
+                })
+            return accounts
 
 # Authentication helper functions
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -966,6 +989,95 @@ class TradeStewardAnalyzer:
         plot_files.append(filename)
         
         return plot_files
+    
+    def generate_commission_chart(self, account_filter: Optional[str] = None) -> str:
+        """Generate commission analysis chart for specific account or all accounts"""
+        if self.data is None:
+            raise ValueError("No data available for chart generation")
+        
+        # Filter data by account if specified
+        data_to_use = self.data.copy()
+        if account_filter:
+            # Check the actual column name in the data
+            account_col = 'AccountNum' if 'AccountNum' in data_to_use.columns else 'account_num'
+            data_to_use = data_to_use[data_to_use[account_col] == account_filter]
+            if data_to_use.empty:
+                raise ValueError(f"No data found for account {account_filter}")
+        
+        # Calculate commission for the filtered data
+        data_to_use['Commission'] = data_to_use['TotalGrossProfitLoss'] - data_to_use['TotalNetProfitLoss']
+        
+        # 4-panel commission analysis
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
+        
+        # Commission per trade over time
+        commission_by_date = data_to_use.groupby(data_to_use['FinalTradeClosedDate'].dt.date)['Commission'].sum().reset_index()
+        commission_by_date['Date'] = pd.to_datetime(commission_by_date['FinalTradeClosedDate'])
+        
+        ax1.plot(commission_by_date['Date'], commission_by_date['Commission'], 
+                linewidth=2, color='red', marker='o', markersize=3)
+        ax1.fill_between(commission_by_date['Date'], commission_by_date['Commission'], 
+                        alpha=0.3, color='red')
+        
+        title_suffix = f" - Account {account_filter}" if account_filter else " - All Accounts"
+        ax1.set_title(f'Daily Commission Costs{title_suffix}', fontsize=14, fontweight='bold')
+        ax1.set_ylabel('Daily Commissions ($)', fontsize=12)
+        ax1.grid(True, alpha=0.3)
+        
+        # Commission by strategy
+        strategy_commissions = data_to_use.groupby('Strategy')['Commission'].agg(['sum', 'mean']).reset_index()
+        strategy_commissions.columns = ['Strategy', 'TotalCommission', 'AvgCommission']
+        
+        bars = ax2.bar(range(len(strategy_commissions)), strategy_commissions['TotalCommission'], 
+                      color='red', alpha=0.7)
+        ax2.set_title(f'Total Commissions by Strategy{title_suffix}', fontsize=14, fontweight='bold')
+        ax2.set_ylabel('Total Commissions ($)', fontsize=12)
+        ax2.set_xticks(range(len(strategy_commissions)))
+        ax2.set_xticklabels(strategy_commissions['Strategy'], rotation=45, ha='right')
+        ax2.grid(True, alpha=0.3)
+        
+        # Add value labels on bars
+        for bar, value in zip(bars, strategy_commissions['TotalCommission']):
+            height = bar.get_height()
+            ax2.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                    f'${value:.0f}', ha='center', va='bottom', fontsize=10)
+        
+        # Monthly commission trend
+        data_to_use['YearMonth'] = data_to_use['OpenDate'].dt.to_period('M')
+        monthly_commissions = data_to_use.groupby('YearMonth')['Commission'].sum()
+        ax3.bar(range(len(monthly_commissions)), monthly_commissions.values, 
+               color='darkred', alpha=0.7)
+        ax3.set_title(f'Monthly Commission Costs{title_suffix}', fontsize=14, fontweight='bold')
+        ax3.set_ylabel('Monthly Commissions ($)', fontsize=12)
+        ax3.set_xticks(range(len(monthly_commissions)))
+        ax3.set_xticklabels([str(m) for m in monthly_commissions.index], rotation=45)
+        ax3.grid(True, alpha=0.3)
+        
+        # Commission vs P&L scatter
+        ax4.scatter(data_to_use['TotalNetProfitLoss'], data_to_use['Commission'], 
+                   alpha=0.6, color='purple', s=20)
+        ax4.set_title(f'Commission vs Trade P&L{title_suffix}', fontsize=14, fontweight='bold')
+        ax4.set_xlabel('Trade P&L ($)', fontsize=12)
+        ax4.set_ylabel('Commission ($)', fontsize=12)
+        ax4.grid(True, alpha=0.3)
+        
+        # Add trend line
+        if len(data_to_use) > 1:
+            z = np.polyfit(data_to_use['TotalNetProfitLoss'], data_to_use['Commission'], 1)
+            p = np.poly1d(z)
+            ax4.plot(sorted(data_to_use['TotalNetProfitLoss']), 
+                    p(sorted(data_to_use['TotalNetProfitLoss'])), 
+                    "r--", alpha=0.8, linewidth=2)
+        
+        plt.tight_layout()
+        
+        # Generate filename
+        account_suffix = f"_account_{account_filter}" if account_filter else "_all_accounts"
+        filename = f"plots/commission_analysis{account_suffix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        plt.savefig(f"uploads/{filename}", dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        return filename
 
 # Authentication endpoints
 @app.post("/register")
@@ -1108,6 +1220,9 @@ async def get_database_analysis(current_user: User = Depends(require_user)):
         # Generate plots
         plot_files = analyzer.generate_plots()
         
+        # Get available accounts for filtering
+        available_accounts = db.get_user_accounts(current_user.user_id)
+        
         # Prepare response similar to upload but without merge statistics
         response = {
             "success": True,
@@ -1115,6 +1230,7 @@ async def get_database_analysis(current_user: User = Depends(require_user)):
             "metrics": analyzer.metrics,
             "plots": plot_files,
             "total_trades": len(analyzer.data),
+            "available_accounts": available_accounts,
             "date_range": f"{analyzer.data['OpenDate'].min().strftime('%Y-%m-%d')} to {analyzer.data['FinalTradeClosedDate'].max().strftime('%Y-%m-%d')}",
             "total_pnl": float(analyzer.data['TotalNetProfitLoss'].sum())
         }
@@ -1184,6 +1300,46 @@ async def get_filtered_database_analysis(
     except Exception as e:
         logger.error("Error getting filtered database analysis", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error retrieving filtered analysis: {str(e)}")
+
+@app.post("/commission-analysis-by-account")
+async def get_commission_analysis_by_account(
+    request: AccountFilterRequest,
+    current_user: User = Depends(require_user)
+):
+    """Get commission analysis filtered by account"""
+    try:
+        # Check if there's data in the database for this user
+        total_trades = db.get_trade_count(current_user.user_id)
+        if total_trades == 0:
+            raise HTTPException(status_code=404, detail="No trading data found in database. Please upload a CSV file first.")
+        
+        # Create user-specific analyzer and load data
+        analyzer = TradeStewardAnalyzer(db, current_user.user_id)
+        
+        if analyzer.data is None or analyzer.data.empty:
+            raise HTTPException(status_code=404, detail="No valid trading data found in database.")
+        
+        # Generate commission chart for the specified account
+        try:
+            commission_plot = analyzer.generate_commission_chart(request.account_num)
+            
+            response = {
+                "success": True,
+                "commission_plot": commission_plot,
+                "account_filter": request.account_num,
+                "filtered": request.account_num is not None
+            }
+            
+            return response
+            
+        except ValueError as ve:
+            raise HTTPException(status_code=404, detail=str(ve))
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error getting commission analysis by account", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error retrieving commission analysis: {str(e)}")
 
 @app.get("/data/summary")
 async def get_data_summary(current_user: User = Depends(require_user)):

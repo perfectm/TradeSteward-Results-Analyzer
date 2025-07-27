@@ -814,6 +814,11 @@
                 populateStrategyFilter(strategies);
             }
             
+            // Populate account filter for commission analysis
+            if (data.available_accounts && data.available_accounts.length > 0) {
+                populateAccountFilter(data.available_accounts);
+            }
+            
             // Remove any existing merge info
             const existingMergeInfo = document.querySelector('.merge-info');
             if (existingMergeInfo) {
@@ -1036,12 +1041,33 @@
                     'Risk & Performance Metrics',
                     'Commission Analysis'
                 ];
-                chartsHtml += `
-                    <div class="chart-container">
-                        <h3>${titles[index] || `Chart ${index + 1}`}</h3>
-                        <img src="/uploads/${plotFile}" alt="${titles[index] || `Chart ${index + 1}`}" />
-                    </div>
-                `;
+                
+                // Special handling for Commission Analysis chart
+                if (index === 3) {
+                    chartsHtml += `
+                        <div class="chart-container">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                                <h3 style="margin: 0;">${titles[index]}</h3>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <label for="accountFilter" style="font-size: 14px; color: #666;">Filter by Account:</label>
+                                    <select id="accountFilter" onchange="applyAccountFilter()" style="padding: 5px 10px; border: 1px solid #ddd; border-radius: 5px; background: white; font-size: 14px;">
+                                        <option value="all">All Accounts</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="commissionChartContainer">
+                                <img src="/uploads/${plotFile}" alt="${titles[index]}" />
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    chartsHtml += `
+                        <div class="chart-container">
+                            <h3>${titles[index] || `Chart ${index + 1}`}</h3>
+                            <img src="/uploads/${plotFile}" alt="${titles[index] || `Chart ${index + 1}`}" />
+                        </div>
+                    `;
+                }
             });
             
             chartsSection.innerHTML = chartsHtml;
@@ -1268,6 +1294,73 @@
                 showError(`Network error: ${err.message}`);
             } finally {
                 hideLoading();
+            }
+        }
+
+        // Account filtering functionality for commission analysis
+        function populateAccountFilter(accounts) {
+            const accountSelect = document.getElementById('accountFilter');
+            if (!accountSelect) return;
+            
+            // Clear existing options except "All Accounts"
+            accountSelect.innerHTML = '<option value="all">All Accounts</option>';
+            
+            // Add account options
+            accounts.forEach(account => {
+                const option = document.createElement('option');
+                option.value = account.account_num;
+                option.textContent = `Account ${account.account_num} (${account.trade_count} trades)`;
+                accountSelect.appendChild(option);
+            });
+            
+            console.log('🏦 Populated account filter with:', accounts);
+        }
+        
+        async function applyAccountFilter() {
+            const accountSelect = document.getElementById('accountFilter');
+            const selectedAccount = accountSelect.value;
+            
+            if (!currentAnalysisData) {
+                showError('No analysis data available to filter');
+                return;
+            }
+            
+            console.log('🏦 Applying account filter:', selectedAccount);
+            
+            // Show loading on just the commission chart
+            const chartContainer = document.getElementById('commissionChartContainer');
+            if (chartContainer) {
+                chartContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;"><div class="spinner" style="display: inline-block; margin-bottom: 10px;"></div><br>Loading commission analysis...</div>';
+            }
+            
+            try {
+                const response = await fetch('/commission-analysis-by-account', {
+                    method: 'POST',
+                    headers: {
+                        ...getAuthHeaders(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        account_num: selectedAccount === 'all' ? null : selectedAccount
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success && data.commission_plot) {
+                    // Update only the commission chart
+                    chartContainer.innerHTML = `<img src="/uploads/${data.commission_plot}" alt="Commission Analysis" />`;
+                    console.log('✅ Commission chart updated for account:', selectedAccount);
+                } else {
+                    throw new Error(data.detail || 'Failed to generate commission chart');
+                }
+            } catch (err) {
+                console.error('❌ Error filtering by account:', err);
+                chartContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: #dc3545;">Error loading commission analysis. Please try again.</div>';
             }
         }
     </script>
