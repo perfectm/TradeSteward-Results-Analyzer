@@ -67,6 +67,10 @@ class StrategyFilterRequest(BaseModel):
 class AccountFilterRequest(BaseModel):
     account_num: Optional[str] = None
 
+class DateRangeRequest(BaseModel):
+    start_date: str
+    end_date: str
+
 def clean_csv_content(raw_csv_content: str) -> str:
     """Clean CSV content to handle malformed rows and formatting issues"""
     try:
@@ -1260,6 +1264,101 @@ class TradeStewardAnalyzer:
         plt.close()
         
         return filename
+    
+    def calculate_daily_metrics(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> dict:
+        """Calculate comprehensive daily performance metrics"""
+        if self.data is None or self.daily_pnl is None:
+            return {}
+        
+        # Filter daily P&L by date range if specified
+        daily_data = self.daily_pnl.copy()
+        if start_date:
+            daily_data = daily_data[daily_data['Date'] >= pd.to_datetime(start_date)]
+        if end_date:
+            daily_data = daily_data[daily_data['Date'] <= pd.to_datetime(end_date)]
+        
+        if daily_data.empty:
+            return {}
+        
+        # Calculate daily metrics
+        total_trading_days = len(daily_data)
+        avg_daily_pnl = daily_data['NetPnL'].mean()
+        best_day = daily_data['NetPnL'].max()
+        worst_day = daily_data['NetPnL'].min()
+        positive_days = (daily_data['NetPnL'] > 0).sum()
+        positive_days_pct = (positive_days / total_trading_days * 100) if total_trading_days > 0 else 0
+        
+        # Calculate average trades per day
+        trades_data = self.data.copy()
+        if start_date:
+            trades_data = trades_data[trades_data['OpenDate'] >= pd.to_datetime(start_date)]
+        if end_date:
+            trades_data = trades_data[trades_data['OpenDate'] <= pd.to_datetime(end_date)]
+        
+        total_trades = len(trades_data)
+        avg_trades_per_day = total_trades / total_trading_days if total_trading_days > 0 else 0
+        
+        return {
+            'total_trading_days': total_trading_days,
+            'avg_daily_pnl': avg_daily_pnl,
+            'best_day': best_day,
+            'worst_day': worst_day,
+            'positive_days_pct': round(positive_days_pct, 1),
+            'avg_trades_per_day': avg_trades_per_day
+        }
+    
+    def get_daily_performance_data(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[dict]:
+        """Get day-by-day performance data for table display"""
+        if self.data is None or self.daily_pnl is None:
+            return []
+        
+        # Filter data by date range if specified
+        daily_data = self.daily_pnl.copy()
+        trades_data = self.data.copy()
+        
+        if start_date:
+            daily_data = daily_data[daily_data['Date'] >= pd.to_datetime(start_date)]
+            trades_data = trades_data[trades_data['OpenDate'] >= pd.to_datetime(start_date)]
+        if end_date:
+            daily_data = daily_data[daily_data['Date'] <= pd.to_datetime(end_date)]
+            trades_data = trades_data[trades_data['OpenDate'] <= pd.to_datetime(end_date)]
+        
+        if daily_data.empty:
+            return []
+        
+        # Group trades by date to get detailed daily information
+        trades_by_date = trades_data.groupby(trades_data['OpenDate'].dt.date)
+        
+        daily_performance = []
+        for _, row in daily_data.iterrows():
+            date = row['Date'].date()
+            date_str = date.strftime('%Y-%m-%d')
+            
+            # Get trades for this date
+            if date in trades_by_date.groups:
+                day_trades = trades_by_date.get_group(date)
+                trade_count = len(day_trades)
+                winning_trades = (day_trades['TotalNetProfitLoss'] > 0).sum()
+                win_rate = round((winning_trades / trade_count * 100) if trade_count > 0 else 0, 1)
+                strategies = day_trades['Strategy'].unique().tolist()
+            else:
+                trade_count = 0
+                win_rate = 0
+                strategies = []
+            
+            daily_performance.append({
+                'date': date_str,
+                'trade_count': trade_count,
+                'daily_pnl': round(row['NetPnL'], 2),
+                'cumulative_pnl': round(row['CumulativePnL'], 2),
+                'win_rate': win_rate,
+                'strategies': strategies
+            })
+        
+        # Sort by date descending (most recent first)
+        daily_performance.sort(key=lambda x: x['date'], reverse=True)
+        
+        return daily_performance
 
 # Authentication endpoints
 @app.post("/register")
@@ -1594,6 +1693,93 @@ async def get_data_summary(current_user: User = Depends(require_user)):
         },
         "columns": list(analyzer.data.columns)
     }
+
+@app.get("/daily-analysis")
+async def get_daily_analysis(current_user: User = Depends(require_user)):
+    """Get daily performance analysis for the current user"""
+    try:
+        # Check if there's data in the database for this user
+        total_trades = db.get_trade_count(current_user.user_id)
+        if total_trades == 0:
+            raise HTTPException(status_code=404, detail="No trading data found in database. Please upload a CSV file first.")
+        
+        # Create user-specific analyzer and load data
+        analyzer = TradeStewardAnalyzer(db, current_user.user_id)
+        
+        if analyzer.data is None or analyzer.data.empty:
+            raise HTTPException(status_code=404, detail="No valid trading data found in database.")
+        
+        # Calculate daily metrics
+        daily_metrics = analyzer.calculate_daily_metrics()
+        
+        # Get daily performance data
+        daily_data = analyzer.get_daily_performance_data()
+        
+        # Get date range
+        start_date = analyzer.data['OpenDate'].min().strftime('%Y-%m-%d')
+        end_date = analyzer.data['OpenDate'].max().strftime('%Y-%m-%d')
+        
+        response = {
+            "success": True,
+            "daily_metrics": daily_metrics,
+            "daily_data": daily_data,
+            "date_range": {
+                "start": start_date,
+                "end": end_date
+            },
+            "total_days": len(daily_data)
+        }
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error getting daily analysis", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error retrieving daily analysis: {str(e)}")
+
+@app.post("/daily-analysis-filtered")
+async def get_filtered_daily_analysis(
+    request: DateRangeRequest,
+    current_user: User = Depends(require_user)
+):
+    """Get daily performance analysis filtered by date range"""
+    try:
+        # Check if there's data in the database for this user
+        total_trades = db.get_trade_count(current_user.user_id)
+        if total_trades == 0:
+            raise HTTPException(status_code=404, detail="No trading data found in database. Please upload a CSV file first.")
+        
+        # Create user-specific analyzer and load data
+        analyzer = TradeStewardAnalyzer(db, current_user.user_id)
+        
+        if analyzer.data is None or analyzer.data.empty:
+            raise HTTPException(status_code=404, detail="No valid trading data found in database.")
+        
+        # Calculate daily metrics for the specified date range
+        daily_metrics = analyzer.calculate_daily_metrics(request.start_date, request.end_date)
+        
+        # Get daily performance data for the specified date range
+        daily_data = analyzer.get_daily_performance_data(request.start_date, request.end_date)
+        
+        response = {
+            "success": True,
+            "daily_metrics": daily_metrics,
+            "daily_data": daily_data,
+            "date_range": {
+                "start": request.start_date,
+                "end": request.end_date
+            },
+            "total_days": len(daily_data)
+        }
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error getting filtered daily analysis", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error retrieving filtered daily analysis: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

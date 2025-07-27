@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TradeSteward Results Analyzer</title>
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-3.0.1.min.js" charset="utf-8"></script>
     <style>
         * {
             margin: 0;
@@ -504,6 +504,9 @@
             <button class="nav-button" id="viewDatabaseBtn" onclick="loadDatabaseAnalysis()">
                 📈 View Complete Trading Analysis
             </button>
+            <button class="nav-button" id="quickDailyAnalysisBtn" onclick="quickDailyAnalysis()" style="background: linear-gradient(45deg, #667eea, #764ba2);">
+                📅 Daily Performance Analysis
+            </button>
             <button class="nav-button" onclick="showUploadSection()" style="background: linear-gradient(45deg, #28a745, #20c997);">
                 📁 Upload New Data
             </button>
@@ -569,7 +572,42 @@
                 <!-- Metrics will be populated by JavaScript -->
             </div>
             
-            <div class="strategy-section">
+            <div style="text-align: center; margin: 20px 0;">
+                <button id="dailyAnalysisBtn" onclick="showDailyAnalysis().catch(err => console.error('Daily analysis error:', err))" style="
+                    background: linear-gradient(45deg, #667eea, #764ba2);
+                    color: white;
+                    border: none;
+                    padding: 12px 30px;
+                    border-radius: 25px;
+                    font-size: 16px;
+                    font-weight: bold;
+                    cursor: pointer;
+                    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+                    transition: all 0.3s ease;
+                    margin-right: 15px;
+                " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(102, 126, 234, 0.4)'" 
+                   onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 15px rgba(102, 126, 234, 0.3)'">
+                    📅 Daily Performance Analysis
+                </button>
+                <button id="backToOverallBtn" onclick="showOverallAnalysis()" style="
+                    background: linear-gradient(45deg, #6c757d, #495057);
+                    color: white;
+                    border: none;
+                    padding: 12px 30px;
+                    border-radius: 25px;
+                    font-size: 16px;
+                    font-weight: bold;
+                    cursor: pointer;
+                    box-shadow: 0 4px 15px rgba(108, 117, 125, 0.3);
+                    transition: all 0.3s ease;
+                    display: none;
+                " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(108, 117, 125, 0.4)'" 
+                   onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 15px rgba(108, 117, 125, 0.3)'">
+                    📊 Back to Overall Analysis
+                </button>
+            </div>
+            
+            <div class="strategy-section" id="strategySection">
                 <h3>📈 Strategy Performance Breakdown <span style="font-size: 0.8em; color: #666; font-weight: normal;">(Cumulative Data)</span></h3>
                 <table class="strategy-table" id="strategyTable">
                     <thead>
@@ -591,6 +629,60 @@
             
             <div class="charts-section" id="chartsSection">
                 <!-- Charts will be populated by JavaScript -->
+            </div>
+            
+            <!-- Daily Analysis Section (Hidden by default) -->
+            <div id="dailyAnalysisSection" style="display: none;">
+                <h2 style="text-align: center; margin-bottom: 30px; color: #333;">📅 Daily Performance Analysis</h2>
+                
+                <div id="dailyMetricsGrid" class="metrics-grid">
+                    <!-- Daily metrics will be populated by JavaScript -->
+                </div>
+                
+                <div class="daily-controls" style="text-align: center; margin: 30px 0;">
+                    <label style="margin-right: 15px;">
+                        <input type="date" id="startDate" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                        Start Date
+                    </label>
+                    <label style="margin-right: 15px;">
+                        <input type="date" id="endDate" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                        End Date
+                    </label>
+                    <button onclick="filterDailyData()" style="
+                        background: #667eea;
+                        color: white;
+                        border: none;
+                        padding: 8px 20px;
+                        border-radius: 5px;
+                        cursor: pointer;
+                        margin-left: 10px;
+                    ">Apply Filter</button>
+                </div>
+                
+                <div class="daily-table-section">
+                    <h3>📊 Day-by-Day Performance</h3>
+                    <div style="max-height: 500px; overflow-y: auto; border: 1px solid #ddd; border-radius: 10px;">
+                        <table class="strategy-table" id="dailyTable">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Trades</th>
+                                    <th>Daily P&L</th>
+                                    <th>Cumulative P&L</th>
+                                    <th>Win Rate</th>
+                                    <th>Strategies</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dailyTableBody">
+                                <!-- Daily data will be populated by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <div class="daily-charts-section" id="dailyChartsSection" style="margin-top: 30px;">
+                    <!-- Daily charts will be populated by JavaScript -->
+                </div>
             </div>
         </div>
         
@@ -782,6 +874,10 @@
                 return;
             }
             
+            // Reset state for new data upload
+            isDataLoaded = false;
+            isDailyViewActive = false;
+            stopDailyViewProtection();
             hideError();
             showLoading();
             
@@ -812,6 +908,7 @@
         
         function displayResults(data, isDatabaseView = false) {
             console.log('🎨 displayResults called with isDatabaseView:', isDatabaseView);
+            console.log('🔍 Current state - isDailyViewActive:', isDailyViewActive, 'switchToDailyAfterLoad:', switchToDailyAfterLoad);
             console.log('📊 Data object keys:', Object.keys(data));
             console.log('📊 Full data:', data);
             
@@ -1069,18 +1166,33 @@
                 populateAccountFilter(data.available_accounts);
             }
             
-            // Show results
-            console.log('🎯 About to show results section');
+            // Mark data as loaded
+            isDataLoaded = true;
+            
+            // Always make results container visible
             results.classList.remove('hidden');
             results.style.display = 'block';
-            console.log('✅ Removed hidden class and set display to block');
-            results.scrollIntoView({ behavior: 'smooth' });
-            console.log('📜 Scrolled to results section');
+            
+            // Show results section if not switching to daily view and not currently in daily view
+            if (!switchToDailyAfterLoad && !isDailyViewActive) {
+                console.log('🎯 About to show overall results section');
+                results.scrollIntoView({ behavior: 'smooth' });
+                console.log('📜 Scrolled to overall results section');
+            } else if (switchToDailyAfterLoad) {
+                console.log('✅ Made results container visible for pending daily view switch');
+            } else if (isDailyViewActive) {
+                console.log('✅ Results container visible, daily view remains active');
+            }
         }
         
         function showLoading() {
             loading.style.display = 'block';
-            results.style.display = 'none';
+            // Don't hide results if we're in daily view
+            if (!isDailyViewActive) {
+                results.style.display = 'none';
+            } else {
+                console.log('🛡️ Protected results section from hiding during daily view');
+            }
         }
         
         function hideLoading() {
@@ -1090,7 +1202,12 @@
         function showError(message) {
             error.innerHTML = `<strong>Error:</strong> ${message}`;
             error.style.display = 'block';
-            results.style.display = 'none';
+            // Don't hide results if we're in daily view
+            if (!isDailyViewActive) {
+                results.style.display = 'none';
+            } else {
+                console.log('🛡️ Protected results section from hiding during daily view (error)');
+            }
         }
         
         function hideError() {
@@ -1099,6 +1216,13 @@
 
         async function loadDatabaseAnalysis() {
             console.log('🚀 loadDatabaseAnalysis called');
+            
+            // If called directly (not from quickDailyAnalysis), ensure we switch to overall view
+            if (!switchToDailyAfterLoad) {
+                isDailyViewActive = false;
+                console.log('📊 Will show overall analysis view after load');
+            }
+            
             hideError();
             showLoading();
             
@@ -1156,6 +1280,11 @@
         function showUploadSection() {
             const uploadSection = document.getElementById('uploadSection');
             const results = document.getElementById('results');
+            
+            // Reset state when switching to upload
+            isDataLoaded = false;
+            isDailyViewActive = false;
+            stopDailyViewProtection();
             
             uploadSection.style.display = 'block';
             results.style.display = 'none';
@@ -1422,6 +1551,11 @@
                 if (data.success) {
                     console.log('✅ All trades deleted successfully');
                     
+                    // Reset state after deleting all data
+                    isDataLoaded = false;
+                    isDailyViewActive = false;
+                    stopDailyViewProtection();
+                    
                     // Clear the results section
                     const results = document.getElementById('results');
                     if (results) {
@@ -1652,6 +1786,574 @@
             img.addEventListener('mouseleave', () => {
                 tooltip.style.display = 'none';
             });
+        }
+
+        // State management for daily analysis
+        let isDataLoaded = false;
+        let switchToDailyAfterLoad = false;
+        let isDailyViewActive = false;
+        let dailyViewProtectionInterval = null;
+
+        // Quick Daily Analysis from Nav Section
+        async function quickDailyAnalysis() {
+            console.log('🚀 Quick daily analysis requested');
+            
+            // Check if results are already loaded and have data
+            const results = document.getElementById('results');
+            const metricsGrid = document.getElementById('metricsGrid');
+            
+            console.log('🔍 Debug info:');
+            console.log('- results element exists:', !!results);
+            console.log('- results has hidden class:', results ? results.classList.contains('hidden') : 'no element');
+            console.log('- results style.display:', results ? results.style.display : 'no element');
+            console.log('- metricsGrid exists:', !!metricsGrid);
+            console.log('- isDataLoaded flag:', isDataLoaded);
+            
+            // Better data detection - check for actual metric cards
+            const hasMetricCards = metricsGrid && metricsGrid.querySelectorAll('.metric-card').length > 0;
+            const isResultsVisible = results && !results.classList.contains('hidden') && results.style.display !== 'none';
+            
+            console.log('- hasMetricCards:', hasMetricCards);
+            console.log('- isResultsVisible:', isResultsVisible);
+            console.log('- isDataLoaded:', isDataLoaded);
+            
+            if (hasMetricCards && isResultsVisible && isDataLoaded) {
+                // Data is already loaded, switch to daily view immediately
+                console.log('📊 Data already loaded, switching to daily view');
+                await showDailyAnalysis();
+            } else {
+                // Need to load database analysis first, then switch to daily view
+                console.log('📈 Loading database analysis first...');
+                
+                // Update button state
+                const button = document.getElementById('quickDailyAnalysisBtn');
+                const originalText = button.textContent;
+                button.disabled = true;
+                button.textContent = '📅 Loading...';
+                
+                try {
+                    // Set flag to switch to daily after load
+                    switchToDailyAfterLoad = true;
+                    
+                    // Load database analysis and wait for completion
+                    await loadDatabaseAnalysis();
+                    
+                    // Ensure data is marked as loaded
+                    isDataLoaded = true;
+                    
+                    // Give a moment for DOM to settle, then switch to daily view
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    
+                    if (switchToDailyAfterLoad) {
+                        console.log('🔄 Switching to daily analysis after load completion');
+                        switchToDailyAfterLoad = false;
+                        await showDailyAnalysis();
+                    } else {
+                        // Ensure we're in overall view if not switching to daily
+                        isDailyViewActive = false;
+                    }
+                    
+                } catch (error) {
+                    console.error('❌ Error loading database analysis:', error);
+                    switchToDailyAfterLoad = false;
+                    showError('Failed to load trading data for daily analysis. Please try again.');
+                } finally {
+                    // Restore button
+                    button.disabled = false;
+                    button.textContent = originalText;
+                }
+            }
+        }
+
+        // Daily Analysis View Functions
+        async function showDailyAnalysis() {
+            console.log('📅 Switching to daily analysis view');
+            
+            try {
+                // Verify we have the required elements
+                const dailyAnalysisSection = document.getElementById('dailyAnalysisSection');
+                if (!dailyAnalysisSection) {
+                    console.error('❌ Daily analysis section not found!');
+                    showError('Daily analysis interface not available. Please refresh the page.');
+                    return;
+                }
+                
+                // Hide overall analysis elements
+                const elementsToHide = [
+                    { element: document.getElementById('metricsGrid')?.parentNode, name: 'metrics grid parent' },
+                    { element: document.getElementById('strategySection'), name: 'strategy section' },
+                    { element: document.getElementById('chartsSection'), name: 'charts section' },
+                    { element: document.getElementById('dailyAnalysisBtn'), name: 'daily analysis button' }
+                ];
+                
+                elementsToHide.forEach(({ element, name }) => {
+                    if (element) {
+                        element.style.display = 'none';
+                        console.log(`✅ Hidden ${name}`);
+                    }
+                });
+                
+                // Show daily analysis elements and force results visibility
+                const results = document.getElementById('results');
+                results.style.setProperty('display', 'block', 'important');
+                results.style.setProperty('visibility', 'visible', 'important');
+                results.style.setProperty('opacity', '1', 'important');
+                results.classList.remove('hidden');
+                
+                dailyAnalysisSection.style.setProperty('display', 'block', 'important');
+                dailyAnalysisSection.style.setProperty('visibility', 'visible', 'important');
+                dailyAnalysisSection.style.setProperty('opacity', '1', 'important');
+                
+                isDailyViewActive = true;
+                console.log('✅ Shown daily analysis section and forced results visibility');
+                
+                const backToOverallBtn = document.getElementById('backToOverallBtn');
+                if (backToOverallBtn) {
+                    backToOverallBtn.style.display = 'inline-block';
+                    console.log('✅ Shown back to overall button');
+                }
+                
+                // Load daily analysis data with error handling
+                console.log('📊 Loading daily analysis data...');
+                try {
+                    await loadDailyAnalysis();
+                    console.log('✅ Daily analysis data loaded successfully');
+                    
+                    // Double-check that we're still in daily view after loading
+                    setTimeout(() => {
+                        if (isDailyViewActive) {
+                            const dailySection = document.getElementById('dailyAnalysisSection');
+                            if (dailySection && dailySection.style.display !== 'block') {
+                                console.log('🔧 Fixing daily section visibility after load');
+                                dailySection.style.display = 'block';
+                            }
+                        }
+                    }, 50);
+                    
+                } catch (error) {
+                    console.error('❌ Failed to load daily analysis data:', error);
+                    showError('Failed to load daily analysis. The overall data is available, but daily breakdown could not be generated.');
+                }
+                
+                // Scroll to daily analysis section
+                dailyAnalysisSection.scrollIntoView({ behavior: 'smooth' });
+                
+                // Debug: Check state after loading
+                setTimeout(() => {
+                    console.log('🔍 Post-load debug check:');
+                    console.log('- isDailyViewActive:', isDailyViewActive);
+                    console.log('- dailyAnalysisSection.style.display:', dailyAnalysisSection.style.display);
+                    console.log('- metricsGrid parent display:', document.getElementById('metricsGrid')?.parentNode?.style?.display);
+                    console.log('- strategySection display:', document.getElementById('strategySection')?.style?.display);
+                    console.log('- chartsSection display:', document.getElementById('chartsSection')?.style?.display);
+                    
+                    // Enhanced debugging for visibility
+                    const results = document.getElementById('results');
+                    const dailySection = document.getElementById('dailyAnalysisSection');
+                    console.log('🔍 Enhanced visibility check:');
+                    console.log('- results element:', results);
+                    console.log('- results.style.display:', results?.style?.display);
+                    console.log('- results.classList:', results?.classList.toString());
+                    console.log('- results.offsetHeight:', results?.offsetHeight);
+                    console.log('- dailySection element:', dailySection);
+                    console.log('- dailySection.style.display:', dailySection?.style?.display);
+                    console.log('- dailySection.offsetHeight:', dailySection?.offsetHeight);
+                    console.log('- dailySection.scrollHeight:', dailySection?.scrollHeight);
+                    console.log('- dailySection visible?:', dailySection?.offsetHeight > 0);
+                }, 1000);
+                
+            } catch (error) {
+                console.error('❌ Error in showDailyAnalysis:', error);
+                showError('An error occurred while switching to daily analysis view.');
+            }
+        }
+        
+        function showOverallAnalysis() {
+            console.log('📊 Switching back to overall analysis view');
+            
+            // Reset daily view state and stop protection
+            isDailyViewActive = false;
+            stopDailyViewProtection();
+            
+            // Show overall analysis
+            document.getElementById('metricsGrid').parentNode.style.display = 'block';
+            document.getElementById('strategySection').style.display = 'block';
+            document.getElementById('chartsSection').style.display = 'block';
+            document.getElementById('dailyAnalysisBtn').style.display = 'inline-block';
+            
+            // Hide daily analysis
+            document.getElementById('dailyAnalysisSection').style.display = 'none';
+            document.getElementById('backToOverallBtn').style.display = 'none';
+            
+            console.log('✅ Switched back to overall view and set isDailyViewActive = false');
+        }
+        
+        async function loadDailyAnalysis() {
+            console.log('📅 Loading daily analysis data...');
+            
+            // Show loading in daily section
+            const dailyMetricsGrid = document.getElementById('dailyMetricsGrid');
+            if (!dailyMetricsGrid) {
+                throw new Error('Daily metrics grid element not found');
+            }
+            
+            dailyMetricsGrid.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;"><div class="spinner" style="display: inline-block; margin-bottom: 10px;"></div><br>Loading daily analysis...</div>';
+            
+            try {
+                const response = await fetch('/daily-analysis', {
+                    headers: getAuthHeaders()
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayDailyAnalysis(data);
+                    console.log('✅ Daily analysis data processed successfully');
+                } else {
+                    throw new Error(data.detail || 'Failed to load daily analysis');
+                }
+            } catch (err) {
+                console.error('❌ Error loading daily analysis:', err);
+                dailyMetricsGrid.innerHTML = '<div style="text-align: center; padding: 20px; color: #dc3545;">Error loading daily analysis. Please try again.</div>';
+                throw err; // Re-throw to be caught by showDailyAnalysis
+            }
+        }
+        
+        function displayDailyAnalysis(data) {
+            console.log('📅 Displaying daily analysis data:', data);
+            
+            // Ensure we stay in daily view mode
+            isDailyViewActive = true;
+            console.log('🔒 Locked isDailyViewActive = true in displayDailyAnalysis');
+            
+            // Display daily metrics
+            const dailyMetricsGrid = document.getElementById('dailyMetricsGrid');
+            const metrics = data.daily_metrics;
+            
+            console.log('🔍 Daily analysis debug:');
+            console.log('- dailyMetricsGrid element:', dailyMetricsGrid);
+            console.log('- metrics data:', metrics);
+            console.log('- data.daily_data length:', data.daily_data?.length);
+            
+            dailyMetricsGrid.innerHTML = `
+                <div class="metric-card">
+                    <div class="metric-value metric-positive">
+                        ${metrics.total_trading_days}
+                    </div>
+                    <div class="metric-label">Total Trading Days</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value ${metrics.avg_daily_pnl >= 0 ? 'metric-positive' : 'metric-negative'}">
+                        $${metrics.avg_daily_pnl.toLocaleString()}
+                    </div>
+                    <div class="metric-label">Avg Daily P&L</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value ${metrics.best_day >= 0 ? 'metric-positive' : 'metric-negative'}">
+                        $${metrics.best_day.toLocaleString()}
+                    </div>
+                    <div class="metric-label">Best Day</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value ${metrics.worst_day >= 0 ? 'metric-positive' : 'metric-negative'}">
+                        $${metrics.worst_day.toLocaleString()}
+                    </div>
+                    <div class="metric-label">Worst Day</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value ${metrics.positive_days_pct >= 50 ? 'metric-positive' : 'metric-negative'}">
+                        ${metrics.positive_days_pct}%
+                    </div>
+                    <div class="metric-label">Positive Days</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">
+                        ${metrics.avg_trades_per_day.toFixed(1)}
+                    </div>
+                    <div class="metric-label">Avg Trades/Day</div>
+                </div>
+            `;
+            
+            // Display daily performance table
+            displayDailyTable(data.daily_data);
+            
+            // Set date range filters
+            if (data.date_range) {
+                document.getElementById('startDate').value = data.date_range.start;
+                document.getElementById('endDate').value = data.date_range.end;
+            }
+            
+            // Verify content was populated
+            console.log('🔍 Content check after population:');
+            console.log('- dailyMetricsGrid.innerHTML length:', dailyMetricsGrid.innerHTML.length);
+            console.log('- dailyTableBody rows:', document.getElementById('dailyTableBody')?.children?.length);
+            console.log('- dailyAnalysisSection offsetHeight:', document.getElementById('dailyAnalysisSection')?.offsetHeight);
+            
+            // Final check to ensure daily view remains visible
+            setTimeout(() => {
+                const dailySection = document.getElementById('dailyAnalysisSection');
+                if (dailySection && dailySection.style.display !== 'block') {
+                    console.log('⚠️ Daily section visibility lost, restoring...');
+                    dailySection.style.display = 'block';
+                    isDailyViewActive = true;
+                }
+            }, 100);
+            
+            // Start monitoring for daily view protection
+            startDailyViewProtection();
+            
+            // Force visibility after a delay
+            setTimeout(() => {
+                forceDailyViewVisibility();
+            }, 200);
+        }
+        
+        function displayDailyTable(dailyData) {
+            const tableBody = document.getElementById('dailyTableBody');
+            let tableRows = '';
+            
+            dailyData.forEach(day => {
+                const pnlClass = day.daily_pnl >= 0 ? 'metric-positive' : 'metric-negative';
+                tableRows += `
+                    <tr>
+                        <td>${day.date}</td>
+                        <td>${day.trade_count}</td>
+                        <td class="${pnlClass}">$${day.daily_pnl.toLocaleString()}</td>
+                        <td class="${pnlClass}">$${day.cumulative_pnl.toLocaleString()}</td>
+                        <td>${day.win_rate}%</td>
+                        <td>${day.strategies.join(', ')}</td>
+                    </tr>
+                `;
+            });
+            
+            tableBody.innerHTML = tableRows;
+        }
+        
+        async function filterDailyData() {
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            
+            if (!startDate || !endDate) {
+                alert('Please select both start and end dates');
+                return;
+            }
+            
+            if (startDate > endDate) {
+                alert('Start date must be before end date');
+                return;
+            }
+            
+            console.log('📅 Filtering daily data:', { startDate, endDate });
+            
+            // Show loading
+            const dailyMetricsGrid = document.getElementById('dailyMetricsGrid');
+            dailyMetricsGrid.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;"><div class="spinner"></div><br>Filtering data...</div>';
+            
+            try {
+                const response = await fetch('/daily-analysis-filtered', {
+                    method: 'POST',
+                    headers: {
+                        ...getAuthHeaders(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        start_date: startDate,
+                        end_date: endDate
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayDailyAnalysis(data);
+                } else {
+                    throw new Error(data.detail || 'Failed to filter daily data');
+                }
+            } catch (err) {
+                console.error('❌ Error filtering daily data:', err);
+                dailyMetricsGrid.innerHTML = '<div style="text-align: center; padding: 20px; color: #dc3545;">Error filtering data. Please try again.</div>';
+            }
+        }
+        
+        // Daily view protection functions
+        let mutationObserver = null;
+        
+        function startDailyViewProtection() {
+            stopDailyViewProtection(); // Clear any existing interval
+            
+            // Add MutationObserver to block any changes to results container
+            const results = document.getElementById('results');
+            if (results && window.MutationObserver) {
+                mutationObserver = new MutationObserver((mutations) => {
+                    mutations.forEach((mutation) => {
+                        if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
+                            const target = mutation.target;
+                            if (target.id === 'results' && isDailyViewActive) {
+                                if (target.style.display === 'none') {
+                                    console.log('🚫 BLOCKED attempt to hide results container!');
+                                    target.style.setProperty('display', 'block', 'important');
+                                    target.style.setProperty('visibility', 'visible', 'important');
+                                }
+                            }
+                        }
+                    });
+                });
+                
+                mutationObserver.observe(results, {
+                    attributes: true,
+                    attributeFilter: ['style', 'class']
+                });
+                
+                console.log('🛡️ MutationObserver installed to protect results container');
+            }
+            
+            dailyViewProtectionInterval = setInterval(() => {
+                if (isDailyViewActive) {
+                    const dailySection = document.getElementById('dailyAnalysisSection');
+                    const results = document.getElementById('results');
+                    
+                    // Check if daily section is hidden
+                    if (dailySection && dailySection.style.display !== 'block') {
+                        console.log('🛡️ Daily view protection: Restoring daily section visibility');
+                        dailySection.style.display = 'block';
+                    }
+                    
+                    // Check if results container is hidden - AGGRESSIVE FIX
+                    if (results && (results.style.display === 'none' || results.classList.contains('hidden'))) {
+                        console.log('🛡️ Daily view protection: AGGRESSIVELY restoring results container');
+                        results.style.setProperty('display', 'block', 'important');
+                        results.style.setProperty('visibility', 'visible', 'important');
+                        results.style.setProperty('opacity', '1', 'important');
+                        results.classList.remove('hidden');
+                        
+                        // Nuclear option: Remove any inline style that might be hiding it
+                        results.removeAttribute('style');
+                        results.style.setProperty('display', 'block', 'important');
+                        results.style.setProperty('visibility', 'visible', 'important');
+                    }
+                    
+                    // Ensure overall sections stay hidden
+                    const elementsToKeepHidden = [
+                        { element: document.getElementById('metricsGrid')?.parentNode, name: 'metrics grid parent' },
+                        { element: document.getElementById('strategySection'), name: 'strategy section' },
+                        { element: document.getElementById('chartsSection'), name: 'charts section' },
+                        { element: document.getElementById('dailyAnalysisBtn'), name: 'daily analysis button' }
+                    ];
+                    
+                    elementsToKeepHidden.forEach(({ element, name }) => {
+                        if (element && element.style.display !== 'none') {
+                            console.log(`🛡️ Daily view protection: Hiding ${name}`);
+                            element.style.display = 'none';
+                        }
+                    });
+                }
+            }, 500); // Check every 500ms
+            
+            console.log('🛡️ Started daily view protection monitoring');
+        }
+        
+        function stopDailyViewProtection() {
+            if (dailyViewProtectionInterval) {
+                clearInterval(dailyViewProtectionInterval);
+                dailyViewProtectionInterval = null;
+                console.log('🛡️ Stopped daily view protection monitoring');
+            }
+            
+            if (mutationObserver) {
+                mutationObserver.disconnect();
+                mutationObserver = null;
+                console.log('🛡️ Disconnected MutationObserver');
+            }
+        }
+        
+        function forceDailyViewVisibility() {
+            console.log('🔧 Force daily view visibility check...');
+            
+            const results = document.getElementById('results');
+            const dailySection = document.getElementById('dailyAnalysisSection');
+            
+            if (!results || !dailySection) {
+                console.error('❌ Missing required elements for daily view');
+                return;
+            }
+            
+            // Force results container to be visible with !important styles
+            results.style.setProperty('display', 'block', 'important');
+            results.style.setProperty('visibility', 'visible', 'important');
+            results.style.setProperty('opacity', '1', 'important');
+            results.classList.remove('hidden');
+            
+            // Force daily section to be visible with !important styles
+            dailySection.style.setProperty('display', 'block', 'important');
+            dailySection.style.setProperty('visibility', 'visible', 'important');
+            dailySection.style.setProperty('opacity', '1', 'important');
+            dailySection.style.setProperty('position', 'relative', 'important');
+            dailySection.style.setProperty('z-index', '1', 'important');
+            
+            // Force hide overall sections
+            const elementsToHide = [
+                document.getElementById('metricsGrid')?.parentNode,
+                document.getElementById('strategySection'),
+                document.getElementById('chartsSection'),
+                document.getElementById('dailyAnalysisBtn')
+            ];
+            
+            elementsToHide.forEach((element, index) => {
+                if (element) {
+                    element.style.setProperty('display', 'none', 'important');
+                    element.style.setProperty('visibility', 'hidden', 'important');
+                }
+            });
+            
+            // Try alternative visibility approaches
+            dailySection.style.setProperty('max-height', 'none', 'important');
+            dailySection.style.setProperty('overflow', 'visible', 'important');
+            dailySection.style.setProperty('height', 'auto', 'important');
+            dailySection.style.setProperty('width', '100%', 'important');
+            
+            // Force scroll to daily section
+            setTimeout(() => {
+                dailySection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 50);
+            
+            console.log('🔧 Forced daily view visibility settings applied');
+            
+            // Check if it worked
+            setTimeout(() => {
+                const isVisible = dailySection.offsetHeight > 0 && dailySection.offsetWidth > 0;
+                console.log('🔧 Daily section now visible:', isVisible);
+                console.log('🔧 Daily section dimensions:', dailySection.offsetWidth, 'x', dailySection.offsetHeight);
+                
+                if (!isVisible) {
+                    console.error('❌ Daily section still not visible after force, checking CSS...');
+                    const computedStyle = window.getComputedStyle(dailySection);
+                    console.log('🔧 Computed display:', computedStyle.display);
+                    console.log('🔧 Computed visibility:', computedStyle.visibility);
+                    console.log('🔧 Computed opacity:', computedStyle.opacity);
+                    console.log('🔧 Computed position:', computedStyle.position);
+                    console.log('🔧 Computed overflow:', computedStyle.overflow);
+                    console.log('🔧 Computed height:', computedStyle.height);
+                    console.log('🔧 Computed width:', computedStyle.width);
+                    console.log('🔧 Computed margin:', computedStyle.margin);
+                    console.log('🔧 Computed padding:', computedStyle.padding);
+                    
+                    // Check parent container
+                    const results = document.getElementById('results');
+                    const resultsComputed = window.getComputedStyle(results);
+                    console.log('🔧 Results computed display:', resultsComputed.display);
+                    console.log('🔧 Results computed visibility:', resultsComputed.visibility);
+                    console.log('🔧 Results computed opacity:', resultsComputed.opacity);
+                    console.log('🔧 Results offsetHeight:', results.offsetHeight);
+                }
+            }, 100);
         }
     </script>
 </body>
