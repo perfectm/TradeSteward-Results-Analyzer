@@ -1,7 +1,8 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Depends, status, Form
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import pandas as pd
 import numpy as np
 import matplotlib
@@ -20,10 +21,43 @@ import traceback
 import csv
 import sqlite3
 from contextlib import contextmanager
+from passlib.context import CryptContext
+from jose import JWTError, jwt
+import hashlib
+import secrets
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Authentication configuration
+SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_urlsafe(32))
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+security = HTTPBearer(auto_error=False)
+
+# User models
+class User:
+    def __init__(self, user_id: int, username: str, email: str, hashed_password: str, created_at: str):
+        self.user_id = user_id
+        self.username = username
+        self.email = email
+        self.hashed_password = hashed_password
+        self.created_at = created_at
+
+class UserCreate:
+    def __init__(self, username: str, email: str, password: str):
+        self.username = username
+        self.email = email
+        self.password = password
+
+class UserLogin:
+    def __init__(self, username: str, password: str):
+        self.username = username
+        self.password = password
 
 def clean_csv_content(raw_csv_content: str) -> str:
     """Clean CSV content to handle malformed rows and formatting issues"""
@@ -86,7 +120,7 @@ def clean_csv_content(raw_csv_content: str) -> str:
         return raw_csv_content
 
 class TradeDatabase:
-    """Database manager for persistent trade storage"""
+    """Database manager for persistent trade storage with user authentication"""
     
     def __init__(self, db_path: str = "trades.db"):
         self.db_path = db_path
@@ -107,11 +141,24 @@ class TradeDatabase:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             
-            # Create trades table
+            # Create users table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    email TEXT UNIQUE NOT NULL,
+                    hashed_password TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_active BOOLEAN DEFAULT TRUE
+                )
+            ''')
+            
+            # Create trades table (now with user_id foreign key)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS trades (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    open_order_number TEXT UNIQUE NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    open_order_number TEXT NOT NULL,
                     account_num TEXT,
                     bot_name TEXT,
                     strategy TEXT,
@@ -129,26 +176,95 @@ class TradeDatabase:
                     total_profit_loss_percent REAL,
                     raw_data TEXT,  -- Store complete row as JSON for full analysis
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (user_id),
+                    UNIQUE(user_id, open_order_number)  -- Unique per user
                 )
             ''')
             
-            # Create index on open_order_number for fast duplicate detection
+            # Create indexes
             cursor.execute('''
-                CREATE INDEX IF NOT EXISTS idx_open_order_number 
-                ON trades(open_order_number)
+                CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)
             ''')
             
-            # Create index on dates for time-based queries
             cursor.execute('''
-                CREATE INDEX IF NOT EXISTS idx_dates 
-                ON trades(open_date, final_trade_closed_date)
+                CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_trades_user_id ON trades(user_id)
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_trades_user_order 
+                ON trades(user_id, open_order_number)
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_trades_dates 
+                ON trades(user_id, open_date, final_trade_closed_date)
             ''')
             
             conn.commit()
             logger.info("Database initialized successfully")
     
-    def insert_trades(self, df: pd.DataFrame) -> Tuple[int, int, int]:
+    # User management methods
+    def create_user(self, username: str, email: str, hashed_password: str) -> Optional[int]:
+        """Create a new user and return user_id"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO users (username, email, hashed_password)
+                    VALUES (?, ?, ?)
+                ''', (username, email, hashed_password))
+                user_id = cursor.lastrowid
+                conn.commit()
+                logger.info(f"Created new user: {username} (ID: {user_id})")
+                return user_id
+        except sqlite3.IntegrityError as e:
+            logger.error(f"User creation failed: {e}")
+            return None
+    
+    def get_user_by_username(self, username: str) -> Optional[User]:
+        """Get user by username"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT user_id, username, email, hashed_password, created_at
+                FROM users WHERE username = ? AND is_active = TRUE
+            ''', (username,))
+            row = cursor.fetchone()
+            if row:
+                return User(
+                    user_id=row['user_id'],
+                    username=row['username'], 
+                    email=row['email'],
+                    hashed_password=row['hashed_password'],
+                    created_at=row['created_at']
+                )
+            return None
+    
+    def get_user_by_id(self, user_id: int) -> Optional[User]:
+        """Get user by user_id"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT user_id, username, email, hashed_password, created_at
+                FROM users WHERE user_id = ? AND is_active = TRUE
+            ''', (user_id,))
+            row = cursor.fetchone()
+            if row:
+                return User(
+                    user_id=row['user_id'],
+                    username=row['username'],
+                    email=row['email'], 
+                    hashed_password=row['hashed_password'],
+                    created_at=row['created_at']
+                )
+            return None
+    
+    def insert_trades(self, df: pd.DataFrame, user_id: int) -> Tuple[int, int, int]:
         """
         Insert trades from DataFrame, avoiding duplicates
         Returns: (inserted_count, updated_count, duplicate_count)
@@ -163,10 +279,10 @@ class TradeDatabase:
             for _, row in df.iterrows():
                 open_order_number = str(row.get('OpenOrderNumber', ''))
                 
-                # Check if trade already exists
+                # Check if trade already exists for this user
                 cursor.execute(
-                    'SELECT id, updated_at FROM trades WHERE open_order_number = ?',
-                    (open_order_number,)
+                    'SELECT id, updated_at FROM trades WHERE user_id = ? AND open_order_number = ?',
+                    (user_id, open_order_number)
                 )
                 existing = cursor.fetchone()
                 
@@ -201,7 +317,7 @@ class TradeDatabase:
                             underlying_close_quote = ?, vix_close_quote = ?,
                             total_net_profit_loss = ?, total_gross_profit_loss = ?, total_profit_loss_percent = ?,
                             raw_data = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE open_order_number = ?
+                        WHERE user_id = ? AND open_order_number = ?
                     ''', (
                         trade_data['account_num'], trade_data['bot_name'], trade_data['strategy'],
                         trade_data['open_date'], trade_data['open_time'], trade_data['underlying'],
@@ -209,7 +325,7 @@ class TradeDatabase:
                         trade_data['final_trade_closed_date'], trade_data['final_trade_closed_time'],
                         trade_data['underlying_close_quote'], trade_data['vix_close_quote'],
                         trade_data['total_net_profit_loss'], trade_data['total_gross_profit_loss'], trade_data['total_profit_loss_percent'],
-                        trade_data['raw_data'], open_order_number
+                        trade_data['raw_data'], user_id, open_order_number
                     ))
                     updated_count += 1
                 else:
@@ -217,15 +333,15 @@ class TradeDatabase:
                     try:
                         cursor.execute('''
                             INSERT INTO trades (
-                                open_order_number, account_num, bot_name, strategy, open_date, open_time,
+                                user_id, open_order_number, account_num, bot_name, strategy, open_date, open_time,
                                 underlying, underlying_open_quote, vix_open_quote,
                                 final_trade_closed_date, final_trade_closed_time,
                                 underlying_close_quote, vix_close_quote,
                                 total_net_profit_loss, total_gross_profit_loss, total_profit_loss_percent,
                                 raw_data
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
-                            trade_data['open_order_number'], trade_data['account_num'], trade_data['bot_name'], trade_data['strategy'],
+                            user_id, trade_data['open_order_number'], trade_data['account_num'], trade_data['bot_name'], trade_data['strategy'],
                             trade_data['open_date'], trade_data['open_time'], trade_data['underlying'],
                             trade_data['underlying_open_quote'], trade_data['vix_open_quote'],
                             trade_data['final_trade_closed_date'], trade_data['final_trade_closed_time'],
@@ -243,12 +359,12 @@ class TradeDatabase:
         logger.info(f"Database operation completed: {inserted_count} inserted, {updated_count} updated, {duplicate_count} duplicates")
         return inserted_count, updated_count, duplicate_count
     
-    def get_all_trades(self) -> pd.DataFrame:
-        """Retrieve all trades as a pandas DataFrame"""
+    def get_all_trades(self, user_id: int) -> pd.DataFrame:
+        """Retrieve all trades for a specific user as a pandas DataFrame"""
         with self.get_connection() as conn:
             # Get the raw data and reconstruct the DataFrame
             cursor = conn.cursor()
-            cursor.execute('SELECT raw_data FROM trades ORDER BY open_date, open_time')
+            cursor.execute('SELECT raw_data FROM trades WHERE user_id = ? ORDER BY open_date, open_time', (user_id,))
             
             rows = []
             for row in cursor.fetchall():
@@ -276,15 +392,73 @@ class TradeDatabase:
             
             return df
     
-    def get_trade_count(self) -> int:
-        """Get total number of trades in database"""
+    def get_trade_count(self, user_id: int) -> int:
+        """Get total number of trades for a specific user"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT COUNT(*) FROM trades')
+            cursor.execute('SELECT COUNT(*) FROM trades WHERE user_id = ?', (user_id,))
             return cursor.fetchone()[0]
 
+# Authentication helper functions
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a password against its hash"""
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    """Hash a password"""
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    """Create a JWT access token"""
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+def verify_token(token: str) -> Optional[dict]:
+    """Verify a JWT token and return the payload"""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except JWTError:
+        return None
+
+async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[User]:
+    """Get the current authenticated user"""
+    if not credentials:
+        return None
+    
+    payload = verify_token(credentials.credentials)
+    if not payload:
+        return None
+    
+    user_id = payload.get("sub")
+    if not user_id:
+        return None
+    
+    try:
+        user_id = int(user_id)
+        user = db.get_user_by_id(user_id)
+        return user
+    except (ValueError, TypeError):
+        return None
+
+async def require_user(current_user: Optional[User] = Depends(get_current_user)) -> User:
+    """Require authentication and return the current user"""
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return current_user
+
 app = FastAPI(title="TradeSteward Results Analyzer", 
-              description="Advanced analysis tool for TradeSteward options trading results")
+              description="Advanced analysis tool for TradeSteward options trading results with user authentication")
 
 # Create directories
 os.makedirs("static", exist_ok=True)
@@ -295,28 +469,37 @@ os.makedirs("uploads/plots", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 templates = Jinja2Templates(directory="templates")
 
+# Global database instance
+db = TradeDatabase()
+
 class TradeStewardAnalyzer:
-    """Core analyzer for TradeSteward trading data"""
+    """Core analyzer for TradeSteward trading data with user support"""
     
-    def __init__(self, db_path: str = "trades.db"):
-        self.db = TradeDatabase(db_path)
+    def __init__(self, db: TradeDatabase, user_id: Optional[int] = None):
+        self.db = db
+        self.user_id = user_id
         self.data = None
         self.daily_pnl = None
         self.metrics = {}
         
-        # Load existing data from database on initialization
-        self._load_from_database()
+        # Load existing data from database if user is specified
+        if self.user_id:
+            self._load_from_database()
         
     def _load_from_database(self):
-        """Load all existing trades from database"""
+        """Load all existing trades from database for current user"""
         try:
-            self.data = self.db.get_all_trades()
+            if not self.user_id:
+                logger.warning("No user_id specified, cannot load trades")
+                return
+                
+            self.data = self.db.get_all_trades(self.user_id)
             if not self.data.empty:
-                logger.info(f"Loaded {len(self.data)} existing trades from database")
+                logger.info(f"Loaded {len(self.data)} existing trades from database for user {self.user_id}")
                 self._calculate_daily_pnl()
                 self._calculate_metrics()
             else:
-                logger.info("No existing trades found in database")
+                logger.info(f"No existing trades found in database for user {self.user_id}")
         except Exception as e:
             logger.error(f"Error loading from database: {e}")
         
@@ -380,8 +563,11 @@ class TradeStewardAnalyzer:
                 raise ValueError("No valid trades remain after filtering")
             
             # Store new data in database and get merge statistics
+            if not self.user_id:
+                raise ValueError("User ID is required to store trades")
+                
             logger.info("Storing new data in database...")
-            inserted_count, updated_count, duplicate_count = self.db.insert_trades(new_df)
+            inserted_count, updated_count, duplicate_count = self.db.insert_trades(new_df, self.user_id)
             
             # Reload all data from database (includes both old and new data)
             logger.info("Reloading all data from database...")
@@ -433,7 +619,11 @@ class TradeStewardAnalyzer:
         total_trades = len(trades)
         total_pnl = trades['TotalNetProfitLoss'].sum()
         total_gross_pnl = trades['TotalGrossProfitLoss'].sum()
-        total_fees = total_pnl - total_gross_pnl if not pd.isna(total_gross_pnl) else 0
+        
+        # Commission Analysis (Gross P&L - Net P&L = Commissions)
+        total_commissions = total_gross_pnl - total_pnl if not pd.isna(total_gross_pnl) else 0
+        avg_commission_per_trade = total_commissions / total_trades if total_trades > 0 else 0
+        commission_percentage = (total_commissions / abs(total_gross_pnl)) * 100 if abs(total_gross_pnl) > 0 else 0
         
         # Win Rate & Trade Analysis
         winning_trades = trades[trades['TotalNetProfitLoss'] > 0]
@@ -458,6 +648,38 @@ class TradeStewardAnalyzer:
         drawdown = cumulative - rolling_max
         max_drawdown = np.min(drawdown) if len(drawdown) > 0 else 0
         
+        # Advanced Risk Metrics
+        # MAR Ratio (Mean Annual Return / Maximum Drawdown)
+        if len(daily_returns) > 1 and max_drawdown < 0:
+            annual_return = np.mean(daily_returns) * 252
+            mar_ratio = abs(annual_return / max_drawdown)
+        else:
+            mar_ratio = 0
+        
+        # Sortino Ratio (risk-adjusted return using downside deviation)
+        if len(daily_returns) > 1:
+            negative_returns = daily_returns[daily_returns < 0]
+            if len(negative_returns) > 0:
+                downside_deviation = np.std(negative_returns) * np.sqrt(252)
+                sortino_ratio = (np.mean(daily_returns) * 252) / downside_deviation if downside_deviation != 0 else 0
+            else:
+                sortino_ratio = float('inf') if np.mean(daily_returns) > 0 else 0
+        else:
+            sortino_ratio = 0
+        
+        # Ulcer Index (measure of downside volatility)
+        if len(cumulative) > 0:
+            drawdown_percentages = []
+            for i in range(len(cumulative)):
+                if rolling_max[i] != 0:
+                    dd_pct = (drawdown[i] / rolling_max[i]) * 100
+                    drawdown_percentages.append(dd_pct ** 2)
+                else:
+                    drawdown_percentages.append(0)
+            ulcer_index = np.sqrt(np.mean(drawdown_percentages)) if len(drawdown_percentages) > 0 else 0
+        else:
+            ulcer_index = 0
+        
         # Time-based Analysis
         trading_days = len(daily)
         if trading_days > 0:
@@ -469,21 +691,42 @@ class TradeStewardAnalyzer:
             total_days = 0
             avg_daily_pnl = 0
         
-        # Strategy Breakdown
+        # Strategy Breakdown with Commission Analysis
         strategy_performance = trades.groupby('Strategy').agg({
             'TotalNetProfitLoss': ['sum', 'mean', 'count'],
+            'TotalGrossProfitLoss': ['sum', 'mean'],
             'TotalProfitLossPercent': 'mean'
         }).round(2)
         
         # Convert strategy performance to JSON-serializable format
         strategy_dict = {}
         for strategy in strategy_performance.index:
+            net_sum = float(strategy_performance.loc[strategy, ('TotalNetProfitLoss', 'sum')])
+            gross_sum = float(strategy_performance.loc[strategy, ('TotalGrossProfitLoss', 'sum')])
+            trade_count = int(strategy_performance.loc[strategy, ('TotalNetProfitLoss', 'count')])
+            commissions = gross_sum - net_sum
+            
             strategy_dict[strategy] = {
-                'total_pnl': float(strategy_performance.loc[strategy, ('TotalNetProfitLoss', 'sum')]),
+                'total_pnl': net_sum,
+                'total_gross_pnl': gross_sum,
+                'total_commissions': commissions,
                 'avg_pnl': float(strategy_performance.loc[strategy, ('TotalNetProfitLoss', 'mean')]),
-                'trade_count': int(strategy_performance.loc[strategy, ('TotalNetProfitLoss', 'count')]),
+                'avg_commission': commissions / trade_count if trade_count > 0 else 0,
+                'trade_count': trade_count,
                 'avg_percentage': float(strategy_performance.loc[strategy, ('TotalProfitLossPercent', 'mean')])
             }
+        
+        # Monthly Commission Analysis
+        trades['YearMonth'] = trades['OpenDate'].dt.to_period('M')
+        monthly_commissions = trades.groupby('YearMonth').agg({
+            'TotalNetProfitLoss': 'sum',
+            'TotalGrossProfitLoss': 'sum'
+        })
+        monthly_commissions['Commissions'] = monthly_commissions['TotalGrossProfitLoss'] - monthly_commissions['TotalNetProfitLoss']
+        monthly_commission_dict = {
+            str(period): float(commission) 
+            for period, commission in monthly_commissions['Commissions'].items()
+        }
         
         # VIX Analysis
         vix_stats = {
@@ -496,7 +739,9 @@ class TradeStewardAnalyzer:
             'total_trades': int(total_trades),
             'total_pnl': float(round(total_pnl, 2)),
             'total_gross_pnl': float(round(total_gross_pnl, 2)),
-            'total_fees': float(round(total_fees, 2)),
+            'total_commissions': float(round(total_commissions, 2)),
+            'avg_commission_per_trade': float(round(avg_commission_per_trade, 2)),
+            'commission_percentage': float(round(commission_percentage, 2)),
             'win_rate': float(round(win_rate, 2)),
             'avg_winner': float(round(avg_winner, 2)),
             'avg_loser': float(round(avg_loser, 2)),
@@ -504,10 +749,14 @@ class TradeStewardAnalyzer:
             'max_drawdown': float(round(max_drawdown, 2)),
             'volatility': float(round(volatility, 2)),
             'sharpe_ratio': float(round(sharpe_ratio, 2)),
+            'mar_ratio': float(round(mar_ratio, 2)),
+            'sortino_ratio': float(round(sortino_ratio, 2)),
+            'ulcer_index': float(round(ulcer_index, 2)),
             'trading_days': int(trading_days),
             'total_days': int(total_days),
             'avg_daily_pnl': float(round(avg_daily_pnl, 2)),
             'strategy_performance': strategy_dict,
+            'monthly_commissions': monthly_commission_dict,
             'vix_stats': vix_stats,
             'date_range': {
                 'start': start_date.strftime('%Y-%m-%d') if trading_days > 0 else 'N/A',
@@ -645,10 +894,133 @@ class TradeStewardAnalyzer:
         plt.close()
         plot_files.append(filename)
         
+        # 4. Commission Analysis
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
+        
+        # Commission per trade over time
+        self.data['Commission'] = self.data['TotalGrossProfitLoss'] - self.data['TotalNetProfitLoss']
+        commission_by_date = self.data.groupby(self.data['FinalTradeClosedDate'].dt.date)['Commission'].sum().reset_index()
+        commission_by_date['Date'] = pd.to_datetime(commission_by_date['FinalTradeClosedDate'])
+        
+        ax1.plot(commission_by_date['Date'], commission_by_date['Commission'], 
+                linewidth=2, color='red', marker='o', markersize=3)
+        ax1.fill_between(commission_by_date['Date'], commission_by_date['Commission'], 
+                        alpha=0.3, color='red')
+        ax1.set_title('Daily Commission Costs', fontsize=14, fontweight='bold')
+        ax1.set_ylabel('Daily Commissions ($)', fontsize=12)
+        ax1.grid(True, alpha=0.3)
+        
+        # Commission by strategy
+        strategy_commissions = self.data.groupby('Strategy')['Commission'].agg(['sum', 'mean']).reset_index()
+        strategy_commissions.columns = ['Strategy', 'TotalCommission', 'AvgCommission']
+        
+        bars = ax2.bar(range(len(strategy_commissions)), strategy_commissions['TotalCommission'], 
+                      color='red', alpha=0.7)
+        ax2.set_title('Total Commissions by Strategy', fontsize=14, fontweight='bold')
+        ax2.set_ylabel('Total Commissions ($)', fontsize=12)
+        ax2.set_xticks(range(len(strategy_commissions)))
+        ax2.set_xticklabels(strategy_commissions['Strategy'], rotation=45, ha='right')
+        ax2.grid(True, alpha=0.3)
+        
+        # Add value labels on bars
+        for bar, value in zip(bars, strategy_commissions['TotalCommission']):
+            height = bar.get_height()
+            ax2.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                    f'${value:.0f}', ha='center', va='bottom', fontsize=10)
+        
+        # Monthly commission trend
+        monthly_commissions = self.data.groupby('YearMonth')['Commission'].sum()
+        ax3.bar(range(len(monthly_commissions)), monthly_commissions.values, 
+               color='darkred', alpha=0.7)
+        ax3.set_title('Monthly Commission Costs', fontsize=14, fontweight='bold')
+        ax3.set_ylabel('Monthly Commissions ($)', fontsize=12)
+        ax3.set_xticks(range(len(monthly_commissions)))
+        ax3.set_xticklabels([str(m) for m in monthly_commissions.index], rotation=45)
+        ax3.grid(True, alpha=0.3)
+        
+        # Commission vs P&L scatter
+        ax4.scatter(self.data['TotalNetProfitLoss'], self.data['Commission'], 
+                   alpha=0.6, color='purple', s=20)
+        ax4.set_title('Commission vs Trade P&L', fontsize=14, fontweight='bold')
+        ax4.set_xlabel('Trade P&L ($)', fontsize=12)
+        ax4.set_ylabel('Commission ($)', fontsize=12)
+        ax4.grid(True, alpha=0.3)
+        
+        # Add trend line
+        if len(self.data) > 1:
+            z = np.polyfit(self.data['TotalNetProfitLoss'], self.data['Commission'], 1)
+            p = np.poly1d(z)
+            ax4.plot(sorted(self.data['TotalNetProfitLoss']), 
+                    p(sorted(self.data['TotalNetProfitLoss'])), 
+                    "r--", alpha=0.8, linewidth=2)
+        
+        plt.tight_layout()
+        filename = f"plots/commission_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        plt.savefig(f"uploads/{filename}", dpi=300, bbox_inches='tight')
+        plt.close()
+        plot_files.append(filename)
+        
         return plot_files
 
-# Global analyzer instance
-analyzer = TradeStewardAnalyzer()
+# Authentication endpoints
+@app.post("/register")
+async def register(username: str = Form(...), email: str = Form(...), password: str = Form(...)):
+    """Register a new user"""
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
+    
+    hashed_password = get_password_hash(password)
+    user_id = db.create_user(username, email, hashed_password)
+    
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Username or email already exists")
+    
+    # Create access token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": str(user_id)}, expires_delta=access_token_expires
+    )
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user_id": user_id,
+        "username": username
+    }
+
+@app.post("/login")
+async def login(username: str = Form(...), password: str = Form(...)):
+    """Login user"""
+    user = db.get_user_by_username(username)
+    if not user or not verify_password(password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Create access token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": str(user.user_id)}, expires_delta=access_token_expires
+    )
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user_id": user.user_id,
+        "username": user.username
+    }
+
+@app.get("/me")
+async def get_current_user_info(current_user: User = Depends(require_user)):
+    """Get current user information"""
+    return {
+        "user_id": current_user.user_id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "created_at": current_user.created_at
+    }
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -656,7 +1028,7 @@ async def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), current_user: User = Depends(require_user)):
     """Process uploaded TradeSteward CSV file"""
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Please upload a CSV file")
@@ -668,6 +1040,9 @@ async def upload_file(file: UploadFile = File(...)):
         
         # Clean the CSV content using the same logic as previous cleaning steps
         csv_content = clean_csv_content(raw_csv_content)
+        
+        # Create user-specific analyzer
+        analyzer = TradeStewardAnalyzer(db, current_user.user_id)
         
         # Analyze data
         result = analyzer.load_data(csv_content)
@@ -701,24 +1076,26 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
 @app.get("/metrics")
-async def get_metrics():
+async def get_metrics(current_user: User = Depends(require_user)):
     """Get current analysis metrics"""
-    if analyzer.data is None:
+    analyzer = TradeStewardAnalyzer(db, current_user.user_id)
+    
+    if analyzer.data is None or analyzer.data.empty:
         raise HTTPException(status_code=404, detail="No data loaded. Please upload a file first.")
     
     return analyzer.metrics
 
 @app.get("/database-analysis")
-async def get_database_analysis():
-    """Get complete analysis of all data in the database"""
+async def get_database_analysis(current_user: User = Depends(require_user)):
+    """Get complete analysis of all data in the database for the current user"""
     try:
-        # Check if there's data in the database
-        total_trades = analyzer.db.get_trade_count()
+        # Check if there's data in the database for this user
+        total_trades = db.get_trade_count(current_user.user_id)
         if total_trades == 0:
             raise HTTPException(status_code=404, detail="No trading data found in database. Please upload a CSV file first.")
         
-        # Reload data from database (in case there were any changes)
-        analyzer._load_from_database()
+        # Create user-specific analyzer and load data
+        analyzer = TradeStewardAnalyzer(db, current_user.user_id)
         
         if analyzer.data is None or analyzer.data.empty:
             raise HTTPException(status_code=404, detail="No valid trading data found in database.")
@@ -745,48 +1122,12 @@ async def get_database_analysis():
         logger.error("Error getting database analysis", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error retrieving database analysis: {str(e)}")
 
-@app.get("/analyze")
-async def analyze_fixed_csv():
-    """Automatically load and analyze the fixed CSV file"""
-    fixed_csv_path = "tradeSteward-performanceLogs-1753563010_fixed.csv"
-    
-    # Check if the fixed CSV file exists
-    if not os.path.exists(fixed_csv_path):
-        raise HTTPException(status_code=404, detail=f"Fixed CSV file not found: {fixed_csv_path}")
-    
-    try:
-        # Read the fixed CSV file
-        with open(fixed_csv_path, 'r', encoding='utf-8') as file:
-            csv_content = file.read()
-        
-        # Analyze data
-        result = analyzer.load_data(csv_content)
-        
-        if not result["success"]:
-            raise HTTPException(status_code=400, detail=f"Error processing file: {result['error']}")
-        
-        # Generate plots
-        plot_files = analyzer.generate_plots()
-        
-        # Prepare response
-        response = {
-            "success": True,
-            "filename": fixed_csv_path,
-            "summary": result,
-            "metrics": analyzer.metrics,
-            "plots": plot_files
-        }
-        
-        return response
-        
-    except Exception as e:
-        logger.error("Error processing fixed CSV file", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
-
 @app.get("/data/summary")
-async def get_data_summary():
-    """Get summary of loaded data"""
-    if analyzer.data is None:
+async def get_data_summary(current_user: User = Depends(require_user)):
+    """Get summary of loaded data for current user"""
+    analyzer = TradeStewardAnalyzer(db, current_user.user_id)
+    
+    if analyzer.data is None or analyzer.data.empty:
         raise HTTPException(status_code=404, detail="No data loaded")
     
     return {

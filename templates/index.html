@@ -290,6 +290,115 @@
             transform: none;
         }
         
+        /* Authentication Styles */
+        .auth-section {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+            max-width: 400px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .auth-tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .auth-tab {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 1rem;
+            color: #666;
+            border-bottom: 2px solid transparent;
+            transition: all 0.3s ease;
+        }
+        
+        .auth-tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+        
+        .auth-form {
+            margin-top: 20px;
+        }
+        
+        .auth-form h3 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+        }
+        
+        .auth-form input {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+        
+        .auth-form input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 5px rgba(102, 126, 234, 0.3);
+        }
+        
+        .auth-button {
+            width: 100%;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: transform 0.2s ease;
+        }
+        
+        .auth-button:hover {
+            transform: translateY(-2px);
+        }
+        
+        .user-section {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        
+        .user-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logout-button {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        
+        .logout-button:hover {
+            background: #c82333;
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+        
         @media (max-width: 768px) {
             .header h1 {
                 font-size: 2rem;
@@ -324,7 +433,47 @@
             </ul>
         </div>
         
-        <div class="nav-section">
+        <!-- Authentication Section -->
+        <div class="auth-section" id="authSection">
+            <div style="text-align: center; margin-bottom: 20px; padding: 20px; background: #f8f9fa; border-radius: 10px;">
+                <h4 style="color: #495057; margin-bottom: 10px;">🔐 Authentication Required</h4>
+                <p style="color: #6c757d; margin: 0;">Please login or register to access your trading analysis dashboard with commission tracking, strategy breakdowns, and comprehensive performance metrics.</p>
+            </div>
+            
+            <div class="auth-tabs">
+                <button class="auth-tab active" onclick="showLogin()">Login</button>
+                <button class="auth-tab" onclick="showRegister()">Register</button>
+            </div>
+            
+            <div class="auth-form" id="loginForm">
+                <h3>Login to Your Account</h3>
+                <form onsubmit="handleLogin(event)">
+                    <input type="text" name="username" placeholder="Username" required>
+                    <input type="password" name="password" placeholder="Password" required>
+                    <button type="submit" class="auth-button">Login</button>
+                </form>
+            </div>
+            
+            <div class="auth-form hidden" id="registerForm">
+                <h3>Create New Account</h3>
+                <form onsubmit="handleRegister(event)">
+                    <input type="text" name="username" placeholder="Username" required>
+                    <input type="email" name="email" placeholder="Email" required>
+                    <input type="password" name="password" placeholder="Password (min 6 characters)" required minlength="6">
+                    <button type="submit" class="auth-button">Register</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- User Info Section -->
+        <div class="user-section hidden" id="userSection">
+            <div class="user-info">
+                <span id="userWelcome">Welcome, <strong id="username"></strong>!</span>
+                <button class="logout-button" onclick="logout()">Logout</button>
+            </div>
+        </div>
+
+        <div class="nav-section hidden" id="navSection">
             <h4 style="margin-bottom: 15px; color: #333;">📊 Quick Actions</h4>
             <button class="nav-button" id="viewDatabaseBtn" onclick="loadDatabaseAnalysis()">
                 📈 View Complete Trading Analysis
@@ -334,7 +483,7 @@
             </button>
         </div>
         
-        <div class="upload-section" id="uploadSection">
+        <div class="upload-section hidden" id="uploadSection">
             <div class="upload-area" id="uploadArea">
                 <div class="upload-icon">📈</div>
                 <div class="upload-text">
@@ -353,7 +502,7 @@
             </div>
         </div>
         
-        <div class="results" id="results">
+        <div class="results hidden" id="results">
             <h2>📊 Cumulative Trading Analysis</h2>
             <p style="text-align: center; color: #666; margin-bottom: 20px;">
                 <em>Showing comprehensive analysis across all uploaded trading data</em>
@@ -370,7 +519,9 @@
                         <tr>
                             <th>Strategy</th>
                             <th>Total P&L</th>
+                            <th>Total Commissions</th>
                             <th>Avg P&L</th>
+                            <th>Avg Commission</th>
                             <th>Trade Count</th>
                             <th>Avg %</th>
                         </tr>
@@ -392,11 +543,151 @@
     </div>
 
     <script>
+        // Authentication state
+        let authToken = localStorage.getItem('authToken');
+        let currentUser = null;
+        
+        // DOM elements
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('fileInput');
         const loading = document.getElementById('loading');
         const results = document.getElementById('results');
         const error = document.getElementById('error');
+        
+        // Initialize app
+        document.addEventListener('DOMContentLoaded', function() {
+            if (authToken) {
+                validateToken();
+            } else {
+                showAuthSection();
+            }
+        });
+        
+        // Authentication functions
+        function showLogin() {
+            document.querySelector('.auth-tab.active').classList.remove('active');
+            document.querySelector('.auth-tab').classList.add('active');
+            document.getElementById('loginForm').classList.remove('hidden');
+            document.getElementById('registerForm').classList.add('hidden');
+        }
+        
+        function showRegister() {
+            document.querySelector('.auth-tab.active').classList.remove('active');
+            document.querySelectorAll('.auth-tab')[1].classList.add('active');
+            document.getElementById('loginForm').classList.add('hidden');
+            document.getElementById('registerForm').classList.remove('hidden');
+        }
+        
+        function showAuthSection() {
+            document.getElementById('authSection').classList.remove('hidden');
+            document.getElementById('userSection').classList.add('hidden');
+            document.getElementById('navSection').classList.add('hidden');
+            document.getElementById('uploadSection').classList.add('hidden');
+            document.getElementById('results').classList.add('hidden');
+        }
+        
+        function showMainApp() {
+            document.getElementById('authSection').classList.add('hidden');
+            document.getElementById('userSection').classList.remove('hidden');
+            document.getElementById('navSection').classList.remove('hidden');
+            document.getElementById('uploadSection').classList.remove('hidden');
+        }
+        
+        async function handleLogin(event) {
+            event.preventDefault();
+            const formData = new FormData(event.target);
+            
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    authToken = data.access_token;
+                    localStorage.setItem('authToken', authToken);
+                    currentUser = { user_id: data.user_id, username: data.username };
+                    localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                    
+                    document.getElementById('username').textContent = data.username;
+                    showMainApp();
+                    hideError();
+                } else {
+                    showError(data.detail || 'Login failed');
+                }
+            } catch (err) {
+                showError('Network error during login');
+            }
+        }
+        
+        async function handleRegister(event) {
+            event.preventDefault();
+            const formData = new FormData(event.target);
+            
+            try {
+                const response = await fetch('/register', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    authToken = data.access_token;
+                    localStorage.setItem('authToken', authToken);
+                    currentUser = { user_id: data.user_id, username: data.username };
+                    localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                    
+                    document.getElementById('username').textContent = data.username;
+                    showMainApp();
+                    hideError();
+                } else {
+                    showError(data.detail || 'Registration failed');
+                }
+            } catch (err) {
+                showError('Network error during registration');
+            }
+        }
+        
+        async function validateToken() {
+            try {
+                const response = await fetch('/me', {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    currentUser = data;
+                    localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                    document.getElementById('username').textContent = data.username;
+                    showMainApp();
+                } else {
+                    logout();
+                }
+            } catch (err) {
+                logout();
+            }
+        }
+        
+        function logout() {
+            authToken = null;
+            currentUser = null;
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('currentUser');
+            showAuthSection();
+            hideError();
+        }
+        
+        // Update API calls to include authorization header
+        function getAuthHeaders() {
+            return {
+                'Authorization': `Bearer ${authToken}`
+            };
+        }
         
         // Drag and drop functionality
         uploadArea.addEventListener('dragover', (e) => {
@@ -443,12 +734,14 @@
             try {
                 const response = await fetch('/upload', {
                     method: 'POST',
-                    body: formData
+                    body: formData,
+                    headers: getAuthHeaders()
                 });
                 
                 const data = await response.json();
                 
                 if (data.success) {
+                    console.log('Upload response:', data); // Debug log
                     displayResults(data);
                 } else {
                     showError(`Error: ${data.detail || 'Unknown error occurred'}`);
@@ -461,8 +754,27 @@
         }
         
         function displayResults(data, isDatabaseView = false) {
+            console.log('🎨 displayResults called with isDatabaseView:', isDatabaseView);
+            console.log('📊 Data object keys:', Object.keys(data));
+            console.log('📊 Full data:', data);
+            
             const metrics = data.metrics;
             const plots = data.plots;
+            
+            console.log('📈 Metrics object:', metrics);
+            console.log('🎭 Plots array:', plots);
+            
+            if (!metrics) {
+                console.error('❌ No metrics data in response');
+                showError('No metrics data received from server');
+                return;
+            }
+            
+            console.log('💰 Commission metrics check:', {
+                total_commissions: metrics.total_commissions,
+                avg_commission_per_trade: metrics.avg_commission_per_trade,
+                commission_percentage: metrics.commission_percentage
+            });
             
             // Remove any existing merge info
             const existingMergeInfo = document.querySelector('.merge-info');
@@ -551,11 +863,35 @@
                     <div class="metric-value ${metrics.total_pnl >= 0 ? 'metric-positive' : 'metric-negative'}">
                         $${metrics.total_pnl.toLocaleString()}
                     </div>
-                    <div class="metric-label">Total P&L</div>
+                    <div class="metric-label">Total Net P&L</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value ${metrics.total_gross_pnl >= 0 ? 'metric-positive' : 'metric-negative'}">
+                        $${metrics.total_gross_pnl.toLocaleString()}
+                    </div>
+                    <div class="metric-label">Total Gross P&L</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value metric-negative">
+                        $${(metrics.total_commissions || 0).toLocaleString()}
+                    </div>
+                    <div class="metric-label">Total Commissions</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-value">${metrics.total_trades}</div>
                     <div class="metric-label">Total Trades</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value metric-negative">
+                        $${(metrics.avg_commission_per_trade || 0).toFixed(2)}
+                    </div>
+                    <div class="metric-label">Avg Commission/Trade</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value metric-negative">
+                        ${(metrics.commission_percentage || 0).toFixed(1)}%
+                    </div>
+                    <div class="metric-label">Commission %</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-value ${metrics.win_rate >= 50 ? 'metric-positive' : 'metric-negative'}">
@@ -582,6 +918,24 @@
                     <div class="metric-label">Sharpe Ratio</div>
                 </div>
                 <div class="metric-card">
+                    <div class="metric-value ${(metrics.mar_ratio || 0) >= 0 ? 'metric-positive' : 'metric-negative'}">
+                        ${(metrics.mar_ratio || 0).toFixed(2)}
+                    </div>
+                    <div class="metric-label">MAR Ratio</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value ${(metrics.sortino_ratio || 0) >= 0 ? 'metric-positive' : 'metric-negative'}">
+                        ${metrics.sortino_ratio === Infinity ? '∞' : (metrics.sortino_ratio || 0).toFixed(2)}
+                    </div>
+                    <div class="metric-label">Sortino Ratio</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value ${(metrics.ulcer_index || 0) <= 10 ? 'metric-positive' : 'metric-negative'}">
+                        ${(metrics.ulcer_index || 0).toFixed(2)}%
+                    </div>
+                    <div class="metric-label">Ulcer Index</div>
+                </div>
+                <div class="metric-card">
                     <div class="metric-value metric-positive">
                         $${metrics.avg_winner.toLocaleString()}
                     </div>
@@ -603,7 +957,9 @@
             for (const strategy in strategyPerf) {
                 const strategyData = strategyPerf[strategy];
                 const totalPnL = strategyData.total_pnl;
+                const totalCommissions = strategyData.total_commissions || 0;
                 const avgPnL = strategyData.avg_pnl;
+                const avgCommission = strategyData.avg_commission || 0;
                 const count = strategyData.trade_count;
                 const avgPercent = strategyData.avg_percentage || 0;
                 
@@ -613,8 +969,14 @@
                         <td class="${totalPnL >= 0 ? 'metric-positive' : 'metric-negative'}">
                             $${totalPnL.toLocaleString()}
                         </td>
+                        <td class="metric-negative">
+                            $${totalCommissions.toLocaleString()}
+                        </td>
                         <td class="${avgPnL >= 0 ? 'metric-positive' : 'metric-negative'}">
                             $${avgPnL.toFixed(2)}
+                        </td>
+                        <td class="metric-negative">
+                            $${avgCommission.toFixed(2)}
                         </td>
                         <td>${count}</td>
                         <td class="${avgPercent >= 0 ? 'metric-positive' : 'metric-negative'}">
@@ -632,8 +994,9 @@
             plots.forEach((plotFile, index) => {
                 const titles = [
                     'Cumulative P&L Performance',
-                    'Strategy Analysis',
-                    'Risk & Performance Metrics'
+                    'Strategy Analysis', 
+                    'Risk & Performance Metrics',
+                    'Commission Analysis'
                 ];
                 chartsHtml += `
                     <div class="chart-container">
@@ -646,8 +1009,12 @@
             chartsSection.innerHTML = chartsHtml;
             
             // Show results
+            console.log('🎯 About to show results section');
+            results.classList.remove('hidden');
             results.style.display = 'block';
+            console.log('✅ Removed hidden class and set display to block');
             results.scrollIntoView({ behavior: 'smooth' });
+            console.log('📜 Scrolled to results section');
         }
         
         function showLoading() {
@@ -670,6 +1037,7 @@
         }
 
         async function loadDatabaseAnalysis() {
+            console.log('🚀 loadDatabaseAnalysis called');
             hideError();
             showLoading();
             
@@ -678,27 +1046,46 @@
             button.textContent = '📊 Loading Analysis...';
             
             try {
-                const response = await fetch('/database-analysis');
+                console.log('📡 Making request to /database-analysis');
+                const response = await fetch('/database-analysis', {
+                    headers: getAuthHeaders()
+                });
+                
+                console.log('📨 Response received:', response.status, response.statusText);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
                 const data = await response.json();
+                console.log('📊 Parsed response data:', data);
                 
                 if (data.success) {
+                    console.log('✅ Success response - calling displayResults');
+                    console.log('📈 Metrics preview:', data.metrics ? Object.keys(data.metrics).slice(0, 5) : 'NO METRICS');
+                    
                     // Modify data to show it's from database
                     data.filename = 'Complete Database';
                     data.new_trades = 0;
                     data.updated_trades = 0;
                     data.duplicate_trades = 0;
                     
+                    console.log('🎯 About to call displayResults with:', data);
                     displayResults(data, true); // Pass true to indicate this is database view
+                    console.log('✅ displayResults completed');
                 } else {
+                    console.log('❌ API returned success=false');
                     showError(`Error: ${data.detail || 'Unknown error occurred'}`);
                 }
             } catch (err) {
+                console.error('❌ Error in loadDatabaseAnalysis:', err);
                 if (err.message.includes('404')) {
                     showError('No trading data found in database. Please upload a CSV file first.');
                 } else {
                     showError(`Network error: ${err.message}`);
                 }
             } finally {
+                console.log('🏁 loadDatabaseAnalysis finally block');
                 hideLoading();
                 button.disabled = false;
                 button.textContent = '📈 View Complete Trading Analysis';
