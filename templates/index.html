@@ -1975,17 +1975,50 @@
             isDailyViewActive = false;
             stopDailyViewProtection();
             
-            // Show overall analysis
-            document.getElementById('metricsGrid').parentNode.style.display = 'block';
-            document.getElementById('strategySection').style.display = 'block';
-            document.getElementById('chartsSection').style.display = 'block';
-            document.getElementById('dailyAnalysisBtn').style.display = 'inline-block';
+            // Force show overall analysis with !important to override protection
+            const metricsGridParent = document.getElementById('metricsGrid').parentNode;
+            const strategySection = document.getElementById('strategySection');
+            const chartsSection = document.getElementById('chartsSection');
+            const dailyAnalysisBtn = document.getElementById('dailyAnalysisBtn');
+            
+            // Remove any !important hidden styles and show elements
+            if (metricsGridParent) {
+                metricsGridParent.style.setProperty('display', 'block', 'important');
+                metricsGridParent.style.setProperty('visibility', 'visible', 'important');
+            }
+            if (strategySection) {
+                strategySection.style.setProperty('display', 'block', 'important');
+                strategySection.style.setProperty('visibility', 'visible', 'important');
+            }
+            if (chartsSection) {
+                chartsSection.style.setProperty('display', 'block', 'important');
+                chartsSection.style.setProperty('visibility', 'visible', 'important');
+            }
+            if (dailyAnalysisBtn) {
+                dailyAnalysisBtn.style.setProperty('display', 'inline-block', 'important');
+                dailyAnalysisBtn.style.setProperty('visibility', 'visible', 'important');
+            }
             
             // Hide daily analysis
-            document.getElementById('dailyAnalysisSection').style.display = 'none';
-            document.getElementById('backToOverallBtn').style.display = 'none';
+            const dailyAnalysisSection = document.getElementById('dailyAnalysisSection');
+            const backToOverallBtn = document.getElementById('backToOverallBtn');
+            
+            if (dailyAnalysisSection) {
+                dailyAnalysisSection.style.setProperty('display', 'none', 'important');
+            }
+            if (backToOverallBtn) {
+                backToOverallBtn.style.setProperty('display', 'none', 'important');
+            }
             
             console.log('✅ Switched back to overall view and set isDailyViewActive = false');
+            
+            // Scroll to the overall analysis
+            setTimeout(() => {
+                const results = document.getElementById('results');
+                if (results) {
+                    results.scrollIntoView({ behavior: 'smooth' });
+                }
+            }, 100);
         }
         
         async function loadDailyAnalysis() {
