@@ -411,10 +411,24 @@ class TradeDatabase:
         """Get all accounts for a specific user with trade counts and obfuscated display names"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            
+            # First check if account_num data exists at all for this user
             cursor.execute('''
                 SELECT account_num, COUNT(*) as trade_count
                 FROM trades 
-                WHERE user_id = ? AND account_num IS NOT NULL
+                WHERE user_id = ?
+                GROUP BY account_num
+                ORDER BY account_num
+            ''', (user_id,))
+            
+            all_accounts = cursor.fetchall()
+            logger.info(f"All account data for user {user_id}: {[(row['account_num'], row['trade_count']) for row in all_accounts]}")
+            
+            # Now get only non-null accounts
+            cursor.execute('''
+                SELECT account_num, COUNT(*) as trade_count
+                FROM trades 
+                WHERE user_id = ? AND account_num IS NOT NULL AND account_num != ''
                 GROUP BY account_num
                 ORDER BY account_num
             ''', (user_id,))
@@ -427,6 +441,8 @@ class TradeDatabase:
                     'account_display': obfuscate_account_number(account_num),  # Obfuscated for display
                     'trade_count': row['trade_count']
                 })
+            
+            logger.info(f"Valid accounts for user {user_id}: {accounts}")
             return accounts
     
     def delete_all_user_trades(self, user_id: int) -> int:
@@ -694,11 +710,16 @@ class TradeStewardAnalyzer:
         
         # Risk Metrics
         daily_returns = daily['NetPnL'].values
+        # Risk-free rate of 4.3% (0.043)
+        risk_free_rate = 0.043
+        
         if len(daily_returns) > 1:
             volatility = np.std(daily_returns) * np.sqrt(252)  # Annualized
-            sharpe_ratio = np.mean(daily_returns) * 252 / volatility if volatility != 0 else 0
+            annualized_return = np.mean(daily_returns) * 252
+            sharpe_ratio = (annualized_return - risk_free_rate) / volatility if volatility != 0 else 0
         else:
             volatility = 0
+            annualized_return = 0
             sharpe_ratio = 0
         
         # Drawdown Analysis
@@ -720,24 +741,54 @@ class TradeStewardAnalyzer:
             negative_returns = daily_returns[daily_returns < 0]
             if len(negative_returns) > 0:
                 downside_deviation = np.std(negative_returns) * np.sqrt(252)
-                sortino_ratio = (np.mean(daily_returns) * 252) / downside_deviation if downside_deviation != 0 else 0
+                sortino_ratio = (annualized_return - risk_free_rate) / downside_deviation if downside_deviation != 0 else 0
             else:
-                sortino_ratio = float('inf') if np.mean(daily_returns) > 0 else 0
+                sortino_ratio = float('inf') if annualized_return > risk_free_rate else 0
         else:
             sortino_ratio = 0
         
-        # Ulcer Index (measure of downside volatility)
-        if len(cumulative) > 0:
+        # UPI (Ulcer Performance Index) - risk-adjusted performance using drawdown
+        if len(cumulative) > 0 and len(daily_returns) > 1:
             drawdown_percentages = []
             for i in range(len(cumulative)):
                 if rolling_max[i] != 0:
-                    dd_pct = (drawdown[i] / rolling_max[i]) * 100
+                    # Calculate drawdown as percentage
+                    dd_pct = abs(drawdown[i] / rolling_max[i]) * 100
                     drawdown_percentages.append(dd_pct ** 2)
                 else:
                     drawdown_percentages.append(0)
+            
+            # Calculate Ulcer Index (as percentage)
             ulcer_index = np.sqrt(np.mean(drawdown_percentages)) if len(drawdown_percentages) > 0 else 0
+            
+            # Convert annualized return to percentage for UPI calculation
+            # Need to calculate return rate based on initial capital
+            if len(cumulative) > 0 and rolling_max[0] != 0:
+                # Use the first peak as a proxy for initial capital
+                initial_capital_proxy = rolling_max[0]
+                annualized_return_pct = (annualized_return / initial_capital_proxy) * 100
+            else:
+                # Fallback: assume $10,000 initial capital
+                annualized_return_pct = (annualized_return / 10000) * 100
+            
+            risk_free_rate_pct = risk_free_rate * 100  # Convert to percentage
+            
+            # UPI = (Return% - Risk-Free Rate%) / Ulcer Index%
+            if ulcer_index == 0:
+                if annualized_return_pct > risk_free_rate_pct:
+                    upi = 999.99  # Very high UPI for no-drawdown profitable strategy
+                else:
+                    upi = 0
+            else:
+                upi = (annualized_return_pct - risk_free_rate_pct) / ulcer_index
+            
+            # Debug logging
+            logger.info(f"UPI Calculation - Annualized Return: ${annualized_return:.2f} ({annualized_return_pct:.2f}%), Risk-Free Rate: {risk_free_rate_pct:.1f}%, Ulcer Index: {ulcer_index:.4f}%, UPI: {upi:.4f}")
+            logger.info(f"Initial capital proxy: ${initial_capital_proxy:.2f}" if len(cumulative) > 0 and rolling_max[0] != 0 else "Using $10,000 fallback initial capital")
         else:
             ulcer_index = 0
+            upi = 0
+            logger.info(f"UPI not calculated - Cumulative length: {len(cumulative)}, Daily returns length: {len(daily_returns)}")
         
         # Time-based Analysis
         trading_days = len(daily)
@@ -810,7 +861,9 @@ class TradeStewardAnalyzer:
             'sharpe_ratio': float(round(sharpe_ratio, 2)),
             'mar_ratio': float(round(mar_ratio, 2)),
             'sortino_ratio': float(round(sortino_ratio, 2)),
+            'risk_free_rate': float(risk_free_rate),
             'ulcer_index': float(round(ulcer_index, 2)),
+            'upi': float(round(upi, 2)),
             'trading_days': int(trading_days),
             'total_days': int(total_days),
             'avg_daily_pnl': float(round(avg_daily_pnl, 2)),
@@ -1021,6 +1074,104 @@ class TradeStewardAnalyzer:
         
         return plot_files
     
+    def generate_interactive_chart_data(self) -> dict:
+        """Generate data for interactive charts using Plotly.js"""
+        if self.data is None or self.daily_pnl is None:
+            return {}
+        
+        chart_data = {}
+        
+        try:
+            # 1. Cumulative P&L Chart Data
+            daily_pnl_clean = self.daily_pnl.fillna(0)  # Replace NaN with 0
+            chart_data['cumulative_pnl'] = {
+                'x': daily_pnl_clean['Date'].dt.strftime('%Y-%m-%d').tolist(),
+                'y': daily_pnl_clean['CumulativePnL'].tolist(),
+                'daily_pnl': daily_pnl_clean['NetPnL'].tolist(),
+                'type': 'scatter',
+                'mode': 'lines+markers',
+                'name': 'Cumulative P&L',
+                'hovertemplate': '<b>Date:</b> %{x}<br><b>Cumulative P&L:</b> $%{y:,.2f}<br><b>Daily P&L:</b> $%{customdata:,.2f}<extra></extra>',
+                'customdata': daily_pnl_clean['NetPnL'].tolist()
+            }
+            
+            # 2. Strategy Performance Data
+            strategy_pnl = self.data.groupby('Strategy')['TotalNetProfitLoss'].agg(['sum', 'count']).reset_index()
+            strategy_pnl.columns = ['Strategy', 'TotalPnL', 'TradeCount']
+            strategy_pnl = strategy_pnl.fillna(0).sort_values('TotalPnL', ascending=False)
+            
+            chart_data['strategy_performance'] = {
+                'x': strategy_pnl['Strategy'].tolist(),
+                'y': strategy_pnl['TotalPnL'].tolist(),
+                'trade_counts': strategy_pnl['TradeCount'].tolist(),
+                'type': 'bar',
+                'name': 'Strategy P&L',
+                'hovertemplate': '<b>Strategy:</b> %{x}<br><b>Total P&L:</b> $%{y:,.2f}<br><b>Trade Count:</b> %{customdata}<extra></extra>',
+                'customdata': strategy_pnl['TradeCount'].tolist()
+            }
+            
+            # 3. P&L Distribution (Histogram)  
+            pnl_values = self.data['TotalNetProfitLoss'].fillna(0).tolist()
+            chart_data['pnl_distribution'] = {
+                'x': pnl_values,
+                'type': 'histogram',
+                'nbinsx': 30,
+                'name': 'P&L Distribution',
+                'hovertemplate': '<b>P&L Range:</b> $%{x:,.2f}<br><b>Count:</b> %{y}<extra></extra>'
+            }
+            
+            # 4. VIX vs P&L Scatter Plot
+            if 'VIXOpenQuote' in self.data.columns and 'VIXCloseQuote' in self.data.columns:
+                # Clean VIX data
+                data_clean = self.data.copy()
+                data_clean['VIXOpenQuote'] = data_clean['VIXOpenQuote'].fillna(0)
+                data_clean['VIXCloseQuote'] = data_clean['VIXCloseQuote'].fillna(0)
+                data_clean['VIXAvg'] = (data_clean['VIXOpenQuote'] + data_clean['VIXCloseQuote']) / 2
+                data_clean['TotalNetProfitLoss'] = data_clean['TotalNetProfitLoss'].fillna(0)
+                
+                # Group by strategy for color coding
+                strategies = data_clean['Strategy'].unique()
+                vix_scatter_data = []
+                
+                for i, strategy in enumerate(strategies):
+                    strategy_data = data_clean[data_clean['Strategy'] == strategy]
+                    vix_scatter_data.append({
+                        'x': strategy_data['VIXAvg'].fillna(0).tolist(),
+                        'y': strategy_data['TotalNetProfitLoss'].fillna(0).tolist(),
+                        'dates': strategy_data['OpenDate'].dt.strftime('%Y-%m-%d').tolist(),
+                        'type': 'scatter',
+                        'mode': 'markers',
+                        'name': strategy,
+                        'hovertemplate': f'<b>Strategy:</b> {strategy}<br><b>VIX:</b> %{{x:.2f}}<br><b>P&L:</b> $%{{y:,.2f}}<br><b>Date:</b> %{{customdata}}<extra></extra>',
+                        'customdata': strategy_data['OpenDate'].dt.strftime('%Y-%m-%d').tolist()
+                    })
+                
+                chart_data['vix_scatter'] = vix_scatter_data
+            
+            # 5. Commission Analysis
+            commission_data = self.data.copy()
+            commission_data['TotalGrossProfitLoss'] = commission_data['TotalGrossProfitLoss'].fillna(0)
+            commission_data['TotalNetProfitLoss'] = commission_data['TotalNetProfitLoss'].fillna(0)
+            commission_data['Commission'] = commission_data['TotalGrossProfitLoss'] - commission_data['TotalNetProfitLoss']
+            commission_by_date = commission_data.groupby(commission_data['FinalTradeClosedDate'].dt.date)['Commission'].sum().reset_index()
+            commission_by_date.columns = ['Date', 'Commission']
+            commission_by_date = commission_by_date.fillna(0)
+            
+            chart_data['commission_analysis'] = {
+                'x': commission_by_date['Date'].astype(str).tolist(),
+                'y': commission_by_date['Commission'].tolist(),
+                'type': 'scatter',
+                'mode': 'lines+markers',
+                'name': 'Daily Commission',
+                'hovertemplate': '<b>Date:</b> %{x}<br><b>Commission:</b> $%{y:,.2f}<extra></extra>'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating interactive chart data: {e}", exc_info=True)
+            return {}
+        
+        return chart_data
+    
     def generate_commission_chart(self, account_filter: Optional[str] = None) -> str:
         """Generate commission analysis chart for specific account or all accounts"""
         if self.data is None:
@@ -1201,6 +1352,13 @@ async def upload_file(file: UploadFile = File(...), current_user: User = Depends
         # Generate plots
         plot_files = analyzer.generate_plots()
         
+        # Generate interactive chart data
+        try:
+            interactive_data = analyzer.generate_interactive_chart_data()
+        except Exception as e:
+            logger.error(f"Error generating interactive chart data: {e}", exc_info=True)
+            interactive_data = {}
+        
         # Prepare response
         response = {
             "success": True,
@@ -1208,6 +1366,7 @@ async def upload_file(file: UploadFile = File(...), current_user: User = Depends
             "summary": result,
             "metrics": analyzer.metrics,
             "plots": plot_files,
+            "interactive_charts": interactive_data,
             # Add merge statistics at top level for frontend
             "total_trades": result.get("total_trades", 0),
             "new_trades": result.get("new_trades", 0),
@@ -1251,8 +1410,16 @@ async def get_database_analysis(current_user: User = Depends(require_user)):
         # Generate plots
         plot_files = analyzer.generate_plots()
         
+        # Generate interactive chart data
+        try:
+            interactive_data = analyzer.generate_interactive_chart_data()
+        except Exception as e:
+            logger.error(f"Error generating interactive chart data: {e}", exc_info=True)
+            interactive_data = {}
+        
         # Get available accounts for filtering
         available_accounts = db.get_user_accounts(current_user.user_id)
+        logger.info(f"Available accounts for user {current_user.username} (ID: {current_user.user_id}): {available_accounts}")
         
         # Prepare response similar to upload but without merge statistics
         response = {
@@ -1260,6 +1427,7 @@ async def get_database_analysis(current_user: User = Depends(require_user)):
             "source": "database",
             "metrics": analyzer.metrics,
             "plots": plot_files,
+            "interactive_charts": interactive_data,
             "total_trades": len(analyzer.data),
             "available_accounts": available_accounts,
             "date_range": f"{analyzer.data['OpenDate'].min().strftime('%Y-%m-%d')} to {analyzer.data['FinalTradeClosedDate'].max().strftime('%Y-%m-%d')}",
@@ -1311,12 +1479,20 @@ async def get_filtered_database_analysis(
         # Generate plots for filtered data
         plot_files = analyzer.generate_plots()
         
+        # Generate interactive chart data
+        try:
+            interactive_data = analyzer.generate_interactive_chart_data()
+        except Exception as e:
+            logger.error(f"Error generating interactive chart data: {e}", exc_info=True)
+            interactive_data = {}
+        
         # Prepare response
         response = {
             "success": True,
             "source": "database_filtered",
             "metrics": analyzer.metrics,
             "plots": plot_files,
+            "interactive_charts": interactive_data,
             "total_trades": len(filtered_data),
             "filtered_strategies": strategies,
             "original_trade_count": len(original_data),

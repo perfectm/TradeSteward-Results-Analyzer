@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TradeSteward Results Analyzer</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -842,20 +843,7 @@
                 populateStrategyFilter(strategies);
             }
             
-            // Populate account filter for commission analysis
-            console.log('🔍 Checking for account data...');
-            console.log('data.available_accounts:', data.available_accounts);
-            console.log('available_accounts exists:', 'available_accounts' in data);
-            console.log('available_accounts length:', data.available_accounts ? data.available_accounts.length : 'undefined');
-            
-            if (data.available_accounts && data.available_accounts.length > 0) {
-                console.log('✅ Calling populateAccountFilter with:', data.available_accounts);
-                populateAccountFilter(data.available_accounts);
-            } else {
-                console.log('❌ Account filter conditions not met');
-                console.log('  - available_accounts exists:', !!data.available_accounts);
-                console.log('  - available_accounts length > 0:', data.available_accounts ? data.available_accounts.length > 0 : false);
-            }
+            // Account filter will be populated after charts are rendered
             
             // Remove any existing merge info
             const existingMergeInfo = document.querySelector('.merge-info');
@@ -996,7 +984,7 @@
                     <div class="metric-value ${metrics.sharpe_ratio >= 0 ? 'metric-positive' : 'metric-negative'}">
                         ${metrics.sharpe_ratio}
                     </div>
-                    <div class="metric-label">Sharpe Ratio</div>
+                    <div class="metric-label">Sharpe Ratio <span style="font-size: 0.8em; color: #999;">(RF: ${metrics.risk_free_rate ? (metrics.risk_free_rate * 100).toFixed(1) : 4.3}%)</span></div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-value ${(metrics.mar_ratio || 0) >= 0 ? 'metric-positive' : 'metric-negative'}">
@@ -1008,13 +996,13 @@
                     <div class="metric-value ${(metrics.sortino_ratio || 0) >= 0 ? 'metric-positive' : 'metric-negative'}">
                         ${metrics.sortino_ratio === Infinity ? '∞' : (metrics.sortino_ratio || 0).toFixed(2)}
                     </div>
-                    <div class="metric-label">Sortino Ratio</div>
+                    <div class="metric-label">Sortino Ratio <span style="font-size: 0.8em; color: #999;">(RF: ${metrics.risk_free_rate ? (metrics.risk_free_rate * 100).toFixed(1) : 4.3}%)</span></div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value ${(metrics.ulcer_index || 0) <= 10 ? 'metric-positive' : 'metric-negative'}">
-                        ${(metrics.ulcer_index || 0).toFixed(2)}%
+                    <div class="metric-value ${(metrics.upi || 0) >= 0 ? 'metric-positive' : 'metric-negative'}">
+                        ${(metrics.upi || 0).toFixed(2)}
                     </div>
-                    <div class="metric-label">Ulcer Index</div>
+                    <div class="metric-label">UPI <span style="font-size: 0.8em; color: #999;">(RF: ${metrics.risk_free_rate ? (metrics.risk_free_rate * 100).toFixed(1) : 4.3}%)</span></div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-value metric-positive">
@@ -1068,47 +1056,18 @@
             }
             strategyTableBody.innerHTML = strategyRows;
             
-            // Display charts
+            // Display charts with hybrid approach (static images + interactive overlays)
             const chartsSection = document.getElementById('chartsSection');
-            let chartsHtml = '<h3 style="text-align: center; color: #333; margin-bottom: 20px; border-bottom: 2px solid #667eea; padding-bottom: 10px;">📊 Visual Analysis <span style="font-size: 0.8em; color: #666; font-weight: normal;">(All Trading Data)</span></h3>';
+            chartsSection.innerHTML = '<h3 style="text-align: center; color: #333; margin-bottom: 20px; border-bottom: 2px solid #667eea; padding-bottom: 10px;">📊 Visual Analysis <span style="font-size: 0.8em; color: #666; font-weight: normal;">(Hover for Details)</span></h3>';
             
-            plots.forEach((plotFile, index) => {
-                const titles = [
-                    'Cumulative P&L Performance',
-                    'Strategy Analysis', 
-                    'Risk & Performance Metrics',
-                    'Commission Analysis'
-                ];
-                
-                // Special handling for Commission Analysis chart
-                if (index === 3) {
-                    chartsHtml += `
-                        <div class="chart-container">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                                <h3 style="margin: 0;">${titles[index]}</h3>
-                                <div style="display: flex; align-items: center; gap: 10px;">
-                                    <label for="accountFilter" style="font-size: 14px; color: #666;">Filter by Account:</label>
-                                    <select id="accountFilter" onchange="applyAccountFilter()" style="padding: 5px 10px; border: 1px solid #ddd; border-radius: 5px; background: white; font-size: 14px;">
-                                        <option value="all">All Accounts</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div id="commissionChartContainer">
-                                <img src="/uploads/${plotFile}" alt="${titles[index]}" />
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    chartsHtml += `
-                        <div class="chart-container">
-                            <h3>${titles[index] || `Chart ${index + 1}`}</h3>
-                            <img src="/uploads/${plotFile}" alt="${titles[index] || `Chart ${index + 1}`}" />
-                        </div>
-                    `;
-                }
-            });
+            // Always use static charts with interactive overlays
+            renderHybridCharts(plots, data.interactive_charts || {})
             
-            chartsSection.innerHTML = chartsHtml;
+            // Populate account filter AFTER charts are rendered (so the element exists)
+            if (data.available_accounts && data.available_accounts.length > 0) {
+                console.log('✅ Calling populateAccountFilter AFTER chart rendering with:', data.available_accounts);
+                populateAccountFilter(data.available_accounts);
+            }
             
             // Show results
             console.log('🎯 About to show results section');
@@ -1337,21 +1296,30 @@
 
         // Account filtering functionality for commission analysis
         function populateAccountFilter(accounts) {
+            console.log('🏦 populateAccountFilter called with:', accounts);
             const accountSelect = document.getElementById('accountFilter');
-            if (!accountSelect) return;
+            console.log('accountFilter element found:', !!accountSelect);
+            if (!accountSelect) {
+                console.error('❌ accountFilter element not found!');
+                return;
+            }
             
             // Clear existing options except "All Accounts"
             accountSelect.innerHTML = '<option value="all">All Accounts</option>';
+            console.log('🧹 Cleared accountFilter, current options:', accountSelect.options.length);
             
             // Add account options with obfuscated display names
-            accounts.forEach(account => {
+            accounts.forEach((account, index) => {
+                console.log(`➕ Adding account ${index + 1}:`, account);
                 const option = document.createElement('option');
                 option.value = account.account_num;  // Use real account number for filtering
                 option.textContent = `Account ${account.account_display} (${account.trade_count} trades)`;  // Use obfuscated display
                 accountSelect.appendChild(option);
+                console.log(`✅ Added option: ${option.textContent}`);
             });
             
-            console.log('🏦 Populated account filter with obfuscated accounts:', accounts.map(a => ({display: a.account_display, trades: a.trade_count})));
+            console.log('🏦 Final accountFilter options count:', accountSelect.options.length);
+            console.log('🏦 Final options:', Array.from(accountSelect.options).map(opt => opt.textContent));
         }
         
         async function applyAccountFilter() {
@@ -1480,6 +1448,210 @@
                 deleteButton.textContent = originalText;
                 deleteButton.style.background = 'linear-gradient(45deg, #dc3545, #c82333)';
             }
+        }
+
+        // Hybrid chart rendering (static images + interactive overlays)
+        function renderHybridCharts(plots, chartData) {
+            const chartsSection = document.getElementById('chartsSection');
+            
+            const titles = [
+                'Cumulative P&L Performance',
+                'Strategy Analysis', 
+                'Risk & Performance Metrics',
+                'Commission Analysis'
+            ];
+            
+            let chartsHtml = '';
+            plots.forEach((plotFile, index) => {
+                const chartId = `chart-${index}`;
+                
+                // Special handling for Commission Analysis chart
+                if (index === 3) {
+                    chartsHtml += `
+                        <div class="chart-container">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                                <h3 style="margin: 0;">${titles[index]}</h3>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <label for="accountFilter" style="font-size: 14px; color: #666;">Filter by Account:</label>
+                                    <select id="accountFilter" onchange="applyAccountFilter()" style="padding: 5px 10px; border: 1px solid #ddd; border-radius: 5px; background: white; font-size: 14px;">
+                                        <option value="all">All Accounts</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="commissionChartContainer" style="position: relative;">
+                                <img src="/uploads/${plotFile}" alt="${titles[index]}" style="width: 100%; height: auto;" />
+                                <div id="${chartId}-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    chartsHtml += `
+                        <div class="chart-container" style="position: relative;">
+                            <h3>${titles[index] || `Chart ${index + 1}`}</h3>
+                            <img src="/uploads/${plotFile}" alt="${titles[index] || `Chart ${index + 1}`}" id="${chartId}-img" style="width: 100%; height: auto;" />
+                            <div id="${chartId}-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></div>
+                        </div>
+                    `;
+                }
+            });
+            
+            chartsSection.innerHTML += chartsHtml;
+            
+            // Add interactive overlays if chart data is available
+            if (Object.keys(chartData).length > 0) {
+                setTimeout(() => addInteractiveOverlays(chartData), 500);
+            }
+        }
+        
+        function addInteractiveOverlays(chartData) {
+            console.log('🎯 Adding interactive overlays to charts...');
+            
+            // Create tooltip element
+            const tooltip = document.createElement('div');
+            tooltip.id = 'chart-tooltip';
+            tooltip.style.cssText = `
+                position: absolute;
+                background: rgba(0, 0, 0, 0.8);
+                color: white;
+                padding: 10px;
+                border-radius: 5px;
+                font-size: 12px;
+                pointer-events: none;
+                z-index: 1000;
+                display: none;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+                max-width: 250px;
+            `;
+            document.body.appendChild(tooltip);
+            
+            // Add interactive overlay to cumulative P&L chart (chart-0)
+            if (chartData.cumulative_pnl) {
+                addLineChartOverlay('chart-0-img', chartData.cumulative_pnl, tooltip);
+            }
+            
+            // Add interactive overlay to strategy chart (chart-1) 
+            if (chartData.strategy_performance) {
+                addBarChartOverlay('chart-1-img', chartData.strategy_performance, tooltip);
+            }
+            
+            // Add interactive overlay to P&L distribution (chart-2)
+            if (chartData.pnl_distribution) {
+                addHistogramOverlay('chart-2-img', chartData.pnl_distribution, tooltip);
+            }
+            
+            // VIX scatter would be in chart-2 as well (risk analysis chart has multiple plots)
+            if (chartData.vix_scatter) {
+                addScatterOverlay('chart-2-img', chartData.vix_scatter, tooltip);
+            }
+        }
+        
+        function addLineChartOverlay(imgId, data, tooltip) {
+            const img = document.getElementById(imgId);
+            if (!img) return;
+            
+            img.addEventListener('mousemove', (e) => {
+                const rect = img.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                
+                // Approximate data point based on mouse position
+                const dataIndex = Math.floor((x / rect.width) * data.x.length);
+                if (dataIndex >= 0 && dataIndex < data.x.length) {
+                    const date = data.x[dataIndex];
+                    const cumPnL = data.y[dataIndex];
+                    const dailyPnL = data.customdata[dataIndex];
+                    
+                    tooltip.innerHTML = `
+                        <b>Date:</b> ${date}<br>
+                        <b>Cumulative P&L:</b> $${cumPnL.toLocaleString('en-US', {minimumFractionDigits: 2})}<br>
+                        <b>Daily P&L:</b> $${dailyPnL.toLocaleString('en-US', {minimumFractionDigits: 2})}
+                    `;
+                    tooltip.style.display = 'block';
+                    tooltip.style.left = (e.clientX + 10) + 'px';
+                    tooltip.style.top = (e.clientY - 10) + 'px';
+                }
+            });
+            
+            img.addEventListener('mouseleave', () => {
+                tooltip.style.display = 'none';
+            });
+        }
+        
+        function addBarChartOverlay(imgId, data, tooltip) {
+            const img = document.getElementById(imgId);
+            if (!img) return;
+            
+            img.addEventListener('mousemove', (e) => {
+                const rect = img.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                
+                // Approximate bar based on mouse position
+                const barIndex = Math.floor((x / rect.width) * data.x.length);
+                if (barIndex >= 0 && barIndex < data.x.length) {
+                    const strategy = data.x[barIndex];
+                    const pnl = data.y[barIndex];
+                    const tradeCount = data.customdata[barIndex];
+                    
+                    tooltip.innerHTML = `
+                        <b>Strategy:</b> ${strategy}<br>
+                        <b>Total P&L:</b> $${pnl.toLocaleString('en-US', {minimumFractionDigits: 2})}<br>
+                        <b>Trade Count:</b> ${tradeCount}
+                    `;
+                    tooltip.style.display = 'block';
+                    tooltip.style.left = (e.clientX + 10) + 'px';
+                    tooltip.style.top = (e.clientY - 10) + 'px';
+                }
+            });
+            
+            img.addEventListener('mouseleave', () => {
+                tooltip.style.display = 'none';
+            });
+        }
+        
+        function addHistogramOverlay(imgId, data, tooltip) {
+            const img = document.getElementById(imgId);
+            if (!img) return;
+            
+            img.addEventListener('mousemove', (e) => {
+                const rect = img.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                
+                // Show general P&L distribution info
+                tooltip.innerHTML = `
+                    <b>P&L Distribution</b><br>
+                    <i>Hover over bars to see frequency data</i><br>
+                    <b>Total Trades:</b> ${data.x.length}
+                `;
+                tooltip.style.display = 'block';
+                tooltip.style.left = (e.clientX + 10) + 'px';
+                tooltip.style.top = (e.clientY - 10) + 'px';
+            });
+            
+            img.addEventListener('mouseleave', () => {
+                tooltip.style.display = 'none';
+            });
+        }
+        
+        function addScatterOverlay(imgId, data, tooltip) {
+            const img = document.getElementById(imgId);
+            if (!img) return;
+            
+            img.addEventListener('mousemove', (e) => {
+                tooltip.innerHTML = `
+                    <b>Risk Analysis Charts</b><br>
+                    <i>Multiple analysis views including:</i><br>
+                    • P&L Distribution<br>
+                    • VIX vs P&L Correlation<br>
+                    • Market Performance Analysis
+                `;
+                tooltip.style.display = 'block';
+                tooltip.style.left = (e.clientX + 10) + 'px';
+                tooltip.style.top = (e.clientY - 10) + 'px';
+            });
+            
+            img.addEventListener('mouseleave', () => {
+                tooltip.style.display = 'none';
+            });
         }
     </script>
 </body>
