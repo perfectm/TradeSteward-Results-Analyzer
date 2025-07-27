@@ -165,10 +165,19 @@ class TradeDatabase:
                     username TEXT UNIQUE NOT NULL,
                     email TEXT UNIQUE NOT NULL,
                     hashed_password TEXT NOT NULL,
+                    initial_capital REAL DEFAULT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     is_active BOOLEAN DEFAULT TRUE
                 )
             ''')
+            
+            # Add initial_capital column to existing users table if it doesn't exist
+            try:
+                cursor.execute('ALTER TABLE users ADD COLUMN initial_capital REAL DEFAULT NULL')
+                logger.info("Added initial_capital column to users table")
+            except Exception:
+                # Column already exists
+                pass
             
             # Create trades table (now with user_id foreign key)
             cursor.execute('''
@@ -302,6 +311,47 @@ class TradeDatabase:
         except Exception as e:
             logger.error(f"Error updating password for user {user_id}: {e}")
             return False
+    
+    def set_initial_capital(self, user_id: int, initial_capital: float) -> bool:
+        """Set user's initial capital for return calculations"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE users 
+                    SET initial_capital = ?
+                    WHERE user_id = ? AND is_active = TRUE
+                ''', (initial_capital, user_id))
+                conn.commit()
+                
+                if cursor.rowcount > 0:
+                    logger.info(f"Updated initial capital to ${initial_capital:.2f} for user ID: {user_id}")
+                    return True
+                else:
+                    logger.warning(f"No user found with ID: {user_id}")
+                    return False
+        except Exception as e:
+            logger.error(f"Error updating initial capital for user {user_id}: {e}")
+            return False
+    
+    def get_initial_capital(self, user_id: int) -> Optional[float]:
+        """Get user's initial capital setting"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT initial_capital 
+                    FROM users 
+                    WHERE user_id = ? AND is_active = TRUE
+                ''', (user_id,))
+                
+                result = cursor.fetchone()
+                if result:
+                    return result[0]  # May be None if not set
+                return None
+        except Exception as e:
+            logger.error(f"Error getting initial capital for user {user_id}: {e}")
+            return None
     
     def insert_trades(self, df: pd.DataFrame, user_id: int) -> Tuple[int, int, int]:
         """
@@ -603,7 +653,10 @@ class TradeStewardAnalyzer:
             if not self.data.empty:
                 logger.info(f"Loaded {len(self.data)} existing trades from database for user {self.user_id}")
                 self._calculate_daily_pnl()
-                self._calculate_metrics()
+                
+                # Get user's initial capital setting
+                user_initial_capital = self.db.get_initial_capital(self.user_id)
+                self._calculate_metrics(user_initial_capital)
             else:
                 logger.info(f"No existing trades found in database for user {self.user_id}")
         except Exception as e:
@@ -713,7 +766,7 @@ class TradeStewardAnalyzer:
         
         self.daily_pnl = daily_data
     
-    def _calculate_metrics(self):
+    def _calculate_metrics(self, user_initial_capital: Optional[float] = None):
         """Calculate comprehensive trading metrics"""
         if self.data is None or self.daily_pnl is None:
             return
@@ -793,14 +846,22 @@ class TradeStewardAnalyzer:
             ulcer_index = np.sqrt(np.mean(drawdown_percentages)) if len(drawdown_percentages) > 0 else 0
             
             # Convert annualized return to percentage for UPI calculation
-            # Need to calculate return rate based on initial capital
-            if len(cumulative) > 0 and rolling_max[0] != 0:
+            # Use user-provided initial capital if available, otherwise use proxy
+            if user_initial_capital and user_initial_capital > 0:
+                # Use user-provided initial capital
+                initial_capital_proxy = user_initial_capital
+                annualized_return_pct = (annualized_return / initial_capital_proxy) * 100
+                capital_source = "user-provided"
+            elif len(cumulative) > 0 and rolling_max[0] != 0:
                 # Use the first peak as a proxy for initial capital
                 initial_capital_proxy = rolling_max[0]
                 annualized_return_pct = (annualized_return / initial_capital_proxy) * 100
+                capital_source = "first peak proxy"
             else:
                 # Fallback: assume $10,000 initial capital
+                initial_capital_proxy = 10000
                 annualized_return_pct = (annualized_return / 10000) * 100
+                capital_source = "$10,000 fallback"
             
             risk_free_rate_pct = risk_free_rate * 100  # Convert to percentage
             
@@ -815,7 +876,7 @@ class TradeStewardAnalyzer:
             
             # Debug logging
             logger.info(f"UPI Calculation - Annualized Return: ${annualized_return:.2f} ({annualized_return_pct:.2f}%), Risk-Free Rate: {risk_free_rate_pct:.1f}%, Ulcer Index: {ulcer_index:.4f}%, UPI: {upi:.4f}")
-            logger.info(f"Initial capital proxy: ${initial_capital_proxy:.2f}" if len(cumulative) > 0 and rolling_max[0] != 0 else "Using $10,000 fallback initial capital")
+            logger.info(f"Initial capital: ${initial_capital_proxy:.2f} ({capital_source})")
         else:
             ulcer_index = 0
             upi = 0
@@ -1595,6 +1656,70 @@ async def update_forgotten_password(
             detail="An error occurred during password update"
         )
 
+@app.post("/set-initial-capital")
+async def set_initial_capital(
+    initial_capital: float = Form(...),
+    current_user: User = Depends(require_user)
+):
+    """Set user's initial capital for return calculations"""
+    try:
+        # Validate initial capital
+        if initial_capital < 100:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Initial capital must be at least $100"
+            )
+        
+        if initial_capital > 1000000000:  # 1 billion limit
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Initial capital cannot exceed $1 billion"
+            )
+        
+        # Update in database
+        success = db.set_initial_capital(current_user.user_id, initial_capital)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update initial capital"
+            )
+        
+        logger.info(f"Initial capital set to ${initial_capital:.2f} for user: {current_user.username}")
+        
+        return {
+            "success": True,
+            "message": f"Initial capital updated to ${initial_capital:,.2f}",
+            "initial_capital": initial_capital
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting initial capital for {current_user.username}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while updating initial capital"
+        )
+
+@app.get("/get-initial-capital")
+async def get_initial_capital(current_user: User = Depends(require_user)):
+    """Get user's initial capital setting"""
+    try:
+        initial_capital = db.get_initial_capital(current_user.user_id)
+        
+        return {
+            "success": True,
+            "initial_capital": initial_capital
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting initial capital for {current_user.username}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while retrieving initial capital"
+        )
+
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     """Main upload page"""
@@ -1748,7 +1873,10 @@ async def get_filtered_database_analysis(
         # Update analyzer with filtered data
         analyzer.data = filtered_data
         analyzer._calculate_daily_pnl()
-        analyzer._calculate_metrics()
+        
+        # Get user's initial capital setting for accurate calculations
+        user_initial_capital = db.get_initial_capital(current_user.user_id)
+        analyzer._calculate_metrics(user_initial_capital)
         
         # Generate plots for filtered data
         plot_files = analyzer.generate_plots()

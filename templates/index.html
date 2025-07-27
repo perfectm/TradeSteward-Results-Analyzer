@@ -640,6 +640,30 @@
         </div>
 
         <div class="nav-section hidden" id="navSection">
+            <!-- Initial Capital Section -->
+            <div style="background: #f8f9fa; border-radius: 10px; padding: 15px; margin-bottom: 20px; border: 1px solid #e9ecef;">
+                <h4 style="margin-bottom: 10px; color: #333; font-size: 0.95rem;">💰 Initial Capital</h4>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="color: #666; font-size: 0.9rem;">$</span>
+                    <input type="number" id="initialCapitalInput" placeholder="25000" min="100" step="100" 
+                           style="flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9rem;"
+                           onchange="updateInitialCapital()">
+                    <button onclick="updateInitialCapital()" style="
+                        background: linear-gradient(45deg, #007bff, #0056b3);
+                        color: white;
+                        border: none;
+                        padding: 8px 12px;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        font-size: 0.85rem;
+                        white-space: nowrap;
+                    ">Update</button>
+                </div>
+                <p style="margin: 8px 0 0 0; font-size: 0.8rem; color: #666;">
+                    Set your starting capital for accurate return calculations
+                </p>
+            </div>
+            
             <h4 style="margin-bottom: 15px; color: #333;">📊 Quick Actions</h4>
             <button class="nav-button" id="viewDatabaseBtn" onclick="loadDatabaseAnalysis()">
                 📈 View Complete Trading Analysis
@@ -976,6 +1000,9 @@
             document.getElementById('userSection').classList.remove('hidden');
             document.getElementById('navSection').classList.remove('hidden');
             document.getElementById('uploadSection').classList.remove('hidden');
+            
+            // Load user's initial capital setting
+            loadInitialCapital();
         }
         
         async function handleLogin(event) {
@@ -1604,6 +1631,64 @@
                 hideLoading();
                 button.disabled = false;
                 button.textContent = '📈 View Complete Trading Analysis';
+            }
+        }
+
+        // Initial Capital Management
+        async function updateInitialCapital() {
+            const input = document.getElementById('initialCapitalInput');
+            const initialCapital = parseFloat(input.value);
+            
+            if (!initialCapital || initialCapital < 100) {
+                alert('Please enter a valid initial capital amount (minimum $100)');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/set-initial-capital', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        ...getAuthHeaders()
+                    },
+                    body: `initial_capital=${initialCapital}`
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    alert(`Initial capital updated to $${initialCapital.toLocaleString()}`);
+                    
+                    // If analysis is currently loaded, refresh it to reflect new calculations
+                    if (isDataLoaded) {
+                        console.log('Refreshing analysis with new initial capital...');
+                        loadDatabaseAnalysis();
+                    }
+                } else {
+                    alert(`Failed to update initial capital: ${result.detail || 'Unknown error'}`);
+                }
+            } catch (error) {
+                alert('Network error updating initial capital');
+                console.error('Error updating initial capital:', error);
+            }
+        }
+        
+        async function loadInitialCapital() {
+            try {
+                const response = await fetch('/get-initial-capital', {
+                    headers: getAuthHeaders()
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    const input = document.getElementById('initialCapitalInput');
+                    if (result.initial_capital) {
+                        input.value = result.initial_capital;
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading initial capital:', error);
             }
         }
 
