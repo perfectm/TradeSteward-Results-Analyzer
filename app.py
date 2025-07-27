@@ -408,7 +408,7 @@ class TradeDatabase:
             return cursor.fetchone()[0]
     
     def get_user_accounts(self, user_id: int) -> List[dict]:
-        """Get all accounts for a specific user with trade counts"""
+        """Get all accounts for a specific user with trade counts and obfuscated display names"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -421,11 +421,42 @@ class TradeDatabase:
             
             accounts = []
             for row in cursor.fetchall():
+                account_num = row['account_num']
                 accounts.append({
-                    'account_num': row['account_num'],
+                    'account_num': account_num,  # Real account number for backend filtering
+                    'account_display': obfuscate_account_number(account_num),  # Obfuscated for display
                     'trade_count': row['trade_count']
                 })
             return accounts
+    
+    def delete_all_user_trades(self, user_id: int) -> int:
+        """Delete all trades for a specific user and return count of deleted trades"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # First get the count of trades to be deleted
+            cursor.execute('SELECT COUNT(*) FROM trades WHERE user_id = ?', (user_id,))
+            trade_count = cursor.fetchone()[0]
+            
+            # Delete all trades for this user
+            cursor.execute('DELETE FROM trades WHERE user_id = ?', (user_id,))
+            conn.commit()
+            
+            logger.info(f"Deleted {trade_count} trades for user {user_id}")
+            return trade_count
+
+# Utility functions
+def obfuscate_account_number(account_num: str) -> str:
+    """Obfuscate account number for privacy (show first 2 and last 2 digits)"""
+    if not account_num or len(account_num) < 4:
+        return "****"
+    
+    # Show first 2 and last 2 characters, mask the middle
+    visible_start = account_num[:2]
+    visible_end = account_num[-2:]
+    masked_middle = "*" * (len(account_num) - 4)
+    
+    return f"{visible_start}{masked_middle}{visible_end}"
 
 # Authentication helper functions
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -1019,7 +1050,7 @@ class TradeStewardAnalyzer:
         ax1.fill_between(commission_by_date['Date'], commission_by_date['Commission'], 
                         alpha=0.3, color='red')
         
-        title_suffix = f" - Account {account_filter}" if account_filter else " - All Accounts"
+        title_suffix = f" - Account {obfuscate_account_number(account_filter)}" if account_filter else " - All Accounts"
         ax1.set_title(f'Daily Commission Costs{title_suffix}', fontsize=14, fontweight='bold')
         ax1.set_ylabel('Daily Commissions ($)', fontsize=12)
         ax1.grid(True, alpha=0.3)
@@ -1340,6 +1371,35 @@ async def get_commission_analysis_by_account(
     except Exception as e:
         logger.error("Error getting commission analysis by account", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error retrieving commission analysis: {str(e)}")
+
+@app.delete("/delete-all-trades")
+async def delete_all_user_trades(current_user: User = Depends(require_user)):
+    """Delete all trades for the current user"""
+    try:
+        # Get current trade count for logging
+        current_count = db.get_trade_count(current_user.user_id)
+        
+        if current_count == 0:
+            return {
+                "success": True,
+                "deleted_count": 0,
+                "message": "No trades found to delete"
+            }
+        
+        # Delete all trades for this user
+        deleted_count = db.delete_all_user_trades(current_user.user_id)
+        
+        logger.info(f"User {current_user.username} (ID: {current_user.user_id}) deleted all {deleted_count} trades")
+        
+        return {
+            "success": True,
+            "deleted_count": deleted_count,
+            "message": f"Successfully deleted {deleted_count} trades"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error deleting all trades for user {current_user.user_id}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error deleting trades: {str(e)}")
 
 @app.get("/data/summary")
 async def get_data_summary(current_user: User = Depends(require_user)):

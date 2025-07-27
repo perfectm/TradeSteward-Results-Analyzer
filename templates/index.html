@@ -481,6 +481,9 @@
             <button class="nav-button" onclick="showUploadSection()" style="background: linear-gradient(45deg, #28a745, #20c997);">
                 📁 Upload New Data
             </button>
+            <button class="nav-button" onclick="confirmDeleteAllTrades()" style="background: linear-gradient(45deg, #dc3545, #c82333); margin-top: 10px;">
+                🗑️ Delete All Trades
+            </button>
         </div>
         
         <div class="upload-section hidden" id="uploadSection">
@@ -815,8 +818,18 @@
             }
             
             // Populate account filter for commission analysis
+            console.log('🔍 Checking for account data...');
+            console.log('data.available_accounts:', data.available_accounts);
+            console.log('available_accounts exists:', 'available_accounts' in data);
+            console.log('available_accounts length:', data.available_accounts ? data.available_accounts.length : 'undefined');
+            
             if (data.available_accounts && data.available_accounts.length > 0) {
+                console.log('✅ Calling populateAccountFilter with:', data.available_accounts);
                 populateAccountFilter(data.available_accounts);
+            } else {
+                console.log('❌ Account filter conditions not met');
+                console.log('  - available_accounts exists:', !!data.available_accounts);
+                console.log('  - available_accounts length > 0:', data.available_accounts ? data.available_accounts.length > 0 : false);
             }
             
             // Remove any existing merge info
@@ -1305,15 +1318,15 @@
             // Clear existing options except "All Accounts"
             accountSelect.innerHTML = '<option value="all">All Accounts</option>';
             
-            // Add account options
+            // Add account options with obfuscated display names
             accounts.forEach(account => {
                 const option = document.createElement('option');
-                option.value = account.account_num;
-                option.textContent = `Account ${account.account_num} (${account.trade_count} trades)`;
+                option.value = account.account_num;  // Use real account number for filtering
+                option.textContent = `Account ${account.account_display} (${account.trade_count} trades)`;  // Use obfuscated display
                 accountSelect.appendChild(option);
             });
             
-            console.log('🏦 Populated account filter with:', accounts);
+            console.log('🏦 Populated account filter with obfuscated accounts:', accounts.map(a => ({display: a.account_display, trades: a.trade_count})));
         }
         
         async function applyAccountFilter() {
@@ -1361,6 +1374,86 @@
             } catch (err) {
                 console.error('❌ Error filtering by account:', err);
                 chartContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: #dc3545;">Error loading commission analysis. Please try again.</div>';
+            }
+        }
+
+        // Delete all trades functionality
+        function confirmDeleteAllTrades() {
+            const userConfirm = confirm(
+                '⚠️ WARNING: This will permanently delete ALL your trading data!\n\n' +
+                'Are you sure you want to delete all trades? This action cannot be undone.\n\n' +
+                'Click OK to proceed or Cancel to abort.'
+            );
+            
+            if (userConfirm) {
+                const doubleConfirm = confirm(
+                    '🚨 FINAL CONFIRMATION 🚨\n\n' +
+                    'This will PERMANENTLY DELETE all your trading data.\n' +
+                    'You will lose all analysis history, metrics, and uploaded trades.\n\n' +
+                    'Are you absolutely sure you want to continue?'
+                );
+                
+                if (doubleConfirm) {
+                    deleteAllTrades();
+                }
+            }
+        }
+        
+        async function deleteAllTrades() {
+            if (!currentUser) {
+                showError('You must be logged in to delete trades');
+                return;
+            }
+            
+            console.log('🗑️ Starting delete all trades process...');
+            
+            // Show loading indicator
+            const deleteButton = document.querySelector('button[onclick="confirmDeleteAllTrades()"]');
+            const originalText = deleteButton.textContent;
+            deleteButton.disabled = true;
+            deleteButton.textContent = '🔄 Deleting...';
+            deleteButton.style.background = '#6c757d';
+            
+            try {
+                const response = await fetch('/delete-all-trades', {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    console.log('✅ All trades deleted successfully');
+                    
+                    // Clear the results section
+                    const results = document.getElementById('results');
+                    if (results) {
+                        results.style.display = 'none';
+                        results.classList.add('hidden');
+                    }
+                    
+                    // Show success message
+                    alert(`✅ Success!\n\nDeleted ${data.deleted_count} trades from your account.\nYou can now upload new CSV files to start fresh.`);
+                    
+                    // Show upload section
+                    showUploadSection();
+                    
+                } else {
+                    throw new Error(data.detail || 'Failed to delete trades');
+                }
+                
+            } catch (err) {
+                console.error('❌ Error deleting trades:', err);
+                alert(`❌ Error deleting trades:\n\n${err.message}\n\nPlease try again or contact support if the problem persists.`);
+            } finally {
+                // Restore button
+                deleteButton.disabled = false;
+                deleteButton.textContent = originalText;
+                deleteButton.style.background = 'linear-gradient(45deg, #dc3545, #c82333)';
             }
         }
     </script>
