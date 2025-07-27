@@ -508,6 +508,34 @@
                 <em>Showing comprehensive analysis across all uploaded trading data</em>
             </p>
             
+            <!-- Strategy Filter Section -->
+            <div class="strategy-filter-section" id="strategyFilterSection" style="display: none;">
+                <div style="background: #f8f9fa; border-radius: 10px; padding: 20px; margin-bottom: 25px; border: 2px solid #e9ecef;">
+                    <h4 style="margin: 0 0 15px 0; color: #333; display: flex; align-items: center;">
+                        <span style="margin-right: 10px;">🎯</span>
+                        Strategy Filter
+                        <span style="margin-left: auto; font-size: 12px; color: #666;" id="selectedStrategiesCount"></span>
+                    </h4>
+                    <p style="margin: 0 0 15px 0; color: #666; font-size: 14px;">
+                        Select which strategies to include in the overall metrics and analysis:
+                    </p>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
+                        <button onclick="selectAllStrategies()" style="background: #28a745; color: white; border: none; padding: 6px 12px; border-radius: 5px; font-size: 12px; cursor: pointer;">
+                            Select All
+                        </button>
+                        <button onclick="deselectAllStrategies()" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 5px; font-size: 12px; cursor: pointer;">
+                            Deselect All
+                        </button>
+                        <button onclick="applyStrategyFilter()" style="background: #007bff; color: white; border: none; padding: 6px 12px; border-radius: 5px; font-size: 12px; cursor: pointer;">
+                            Apply Filter
+                        </button>
+                    </div>
+                    <div class="strategy-checkboxes" id="strategyCheckboxes" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+                        <!-- Strategy checkboxes will be populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+            
             <div class="metrics-grid" id="metricsGrid">
                 <!-- Metrics will be populated by JavaScript -->
             </div>
@@ -775,6 +803,16 @@
                 avg_commission_per_trade: metrics.avg_commission_per_trade,
                 commission_percentage: metrics.commission_percentage
             });
+            
+            // Store current analysis data for filtering
+            currentAnalysisData = data;
+            
+            // Populate strategy filter if this is the initial load
+            if (isDatabaseView && metrics.strategy_performance) {
+                const strategies = Object.keys(metrics.strategy_performance);
+                console.log('🎯 Populating strategy filter with:', strategies);
+                populateStrategyFilter(strategies);
+            }
             
             // Remove any existing merge info
             const existingMergeInfo = document.querySelector('.merge-info');
@@ -1101,6 +1139,136 @@
             
             // Scroll to upload section
             uploadSection.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Strategy filtering functionality
+        let currentAnalysisData = null;
+        let selectedStrategies = new Set();
+
+        function populateStrategyFilter(strategies) {
+            const checkboxContainer = document.getElementById('strategyCheckboxes');
+            const filterSection = document.getElementById('strategyFilterSection');
+            
+            if (!strategies || strategies.length === 0) {
+                filterSection.style.display = 'none';
+                return;
+            }
+            
+            // Clear existing checkboxes
+            checkboxContainer.innerHTML = '';
+            
+            // Initialize all strategies as selected
+            selectedStrategies.clear();
+            strategies.forEach(strategy => selectedStrategies.add(strategy));
+            
+            // Create checkboxes for each strategy
+            strategies.forEach(strategy => {
+                const checkboxDiv = document.createElement('div');
+                checkboxDiv.style.cssText = 'display: flex; align-items: center; padding: 8px; background: white; border-radius: 5px; border: 1px solid #ddd;';
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = `strategy_${strategy.replace(/\s+/g, '_')}`;
+                checkbox.checked = true;
+                checkbox.style.marginRight = '8px';
+                checkbox.addEventListener('change', function() {
+                    if (this.checked) {
+                        selectedStrategies.add(strategy);
+                    } else {
+                        selectedStrategies.delete(strategy);
+                    }
+                    updateSelectedCount();
+                });
+                
+                const label = document.createElement('label');
+                label.htmlFor = checkbox.id;
+                label.textContent = strategy;
+                label.style.cssText = 'flex: 1; cursor: pointer; font-size: 14px;';
+                
+                checkboxDiv.appendChild(checkbox);
+                checkboxDiv.appendChild(label);
+                checkboxContainer.appendChild(checkboxDiv);
+            });
+            
+            updateSelectedCount();
+            filterSection.style.display = 'block';
+        }
+        
+        function updateSelectedCount() {
+            const countElement = document.getElementById('selectedStrategiesCount');
+            const total = document.querySelectorAll('#strategyCheckboxes input[type="checkbox"]').length;
+            const selected = selectedStrategies.size;
+            countElement.textContent = `${selected}/${total} selected`;
+        }
+        
+        function selectAllStrategies() {
+            const checkboxes = document.querySelectorAll('#strategyCheckboxes input[type="checkbox"]');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = true;
+                const strategy = checkbox.nextElementSibling.textContent;
+                selectedStrategies.add(strategy);
+            });
+            updateSelectedCount();
+        }
+        
+        function deselectAllStrategies() {
+            const checkboxes = document.querySelectorAll('#strategyCheckboxes input[type="checkbox"]');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = false;
+            });
+            selectedStrategies.clear();
+            updateSelectedCount();
+        }
+        
+        async function applyStrategyFilter() {
+            if (!currentAnalysisData) {
+                showError('No analysis data available to filter');
+                return;
+            }
+            
+            if (selectedStrategies.size === 0) {
+                showError('Please select at least one strategy');
+                return;
+            }
+            
+            // Show loading
+            showLoading();
+            
+            try {
+                const strategiesArray = Array.from(selectedStrategies);
+                const response = await fetch('/database-analysis-filtered', {
+                    method: 'POST',
+                    headers: {
+                        ...getAuthHeaders(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        strategies: strategiesArray
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Update the display with filtered data
+                    data.filename = `Filtered Analysis (${strategiesArray.length} strategies)`;
+                    data.new_trades = 0;
+                    data.updated_trades = 0;
+                    data.duplicate_trades = 0;
+                    
+                    displayResults(data, true);
+                } else {
+                    showError(`Error: ${data.detail || 'Unknown error occurred'}`);
+                }
+            } catch (err) {
+                showError(`Network error: ${err.message}`);
+            } finally {
+                hideLoading();
+            }
         }
     </script>
 </body>

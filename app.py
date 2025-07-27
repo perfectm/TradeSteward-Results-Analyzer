@@ -3,6 +3,8 @@ from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel
+from typing import List
 import pandas as pd
 import numpy as np
 import matplotlib
@@ -58,6 +60,9 @@ class UserLogin:
     def __init__(self, username: str, password: str):
         self.username = username
         self.password = password
+
+class StrategyFilterRequest(BaseModel):
+    strategies: List[str]
 
 def clean_csv_content(raw_csv_content: str) -> str:
     """Clean CSV content to handle malformed rows and formatting issues"""
@@ -1121,6 +1126,64 @@ async def get_database_analysis(current_user: User = Depends(require_user)):
     except Exception as e:
         logger.error("Error getting database analysis", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error retrieving database analysis: {str(e)}")
+
+@app.post("/database-analysis-filtered")
+async def get_filtered_database_analysis(
+    request: StrategyFilterRequest,
+    current_user: User = Depends(require_user)
+):
+    """Get analysis of database filtered by selected strategies"""
+    try:
+        strategies = request.strategies
+        if not strategies:
+            raise HTTPException(status_code=400, detail="No strategies specified for filtering")
+        
+        # Check if there's data in the database for this user
+        total_trades = db.get_trade_count(current_user.user_id)
+        if total_trades == 0:
+            raise HTTPException(status_code=404, detail="No trading data found in database. Please upload a CSV file first.")
+        
+        # Create user-specific analyzer and load data
+        analyzer = TradeStewardAnalyzer(db, current_user.user_id)
+        
+        if analyzer.data is None or analyzer.data.empty:
+            raise HTTPException(status_code=404, detail="No valid trading data found in database.")
+        
+        # Filter data by selected strategies
+        original_data = analyzer.data.copy()
+        filtered_data = analyzer.data[analyzer.data['Strategy'].isin(strategies)]
+        
+        if filtered_data.empty:
+            raise HTTPException(status_code=404, detail="No trades found for selected strategies.")
+        
+        # Update analyzer with filtered data
+        analyzer.data = filtered_data
+        analyzer._calculate_daily_pnl()
+        analyzer._calculate_metrics()
+        
+        # Generate plots for filtered data
+        plot_files = analyzer.generate_plots()
+        
+        # Prepare response
+        response = {
+            "success": True,
+            "source": "database_filtered",
+            "metrics": analyzer.metrics,
+            "plots": plot_files,
+            "total_trades": len(filtered_data),
+            "filtered_strategies": strategies,
+            "original_trade_count": len(original_data),
+            "date_range": f"{filtered_data['OpenDate'].min().strftime('%Y-%m-%d')} to {filtered_data['FinalTradeClosedDate'].max().strftime('%Y-%m-%d')}",
+            "total_pnl": float(filtered_data['TotalNetProfitLoss'].sum())
+        }
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error getting filtered database analysis", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error retrieving filtered analysis: {str(e)}")
 
 @app.get("/data/summary")
 async def get_data_summary(current_user: User = Depends(require_user)):
