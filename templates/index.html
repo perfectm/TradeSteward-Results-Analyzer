@@ -453,6 +453,19 @@
             opacity: 1;
             color: #667eea;
         }
+        
+        /* Responsive design for metrics header with account filter */
+        @media (max-width: 768px) {
+            .metrics-header-container {
+                flex-direction: column !important;
+                align-items: flex-start !important;
+                gap: 10px;
+            }
+            
+            .metrics-header-container h3 {
+                margin-bottom: 0 !important;
+            }
+        }
     </style>
 </head>
 <body>
@@ -1388,20 +1401,35 @@
                 metricsGrid.parentNode.insertBefore(mergeInfo, metricsGrid);
             }
             
-            // Add header for metrics section
+            // Add header for metrics section with account filter
             const metricsContainer = document.getElementById('metricsGrid').parentNode;
-            let existingHeader = metricsContainer.querySelector('.metrics-header');
+            let existingHeader = metricsContainer.querySelector('.metrics-header-container');
             if (existingHeader) {
                 existingHeader.remove();
             }
             
+            const metricsHeaderContainer = document.createElement('div');
+            metricsHeaderContainer.className = 'metrics-header-container';
+            metricsHeaderContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin: 20px 0 15px 0; border-bottom: 2px solid #667eea; padding-bottom: 10px;';
+            
             const metricsHeader = document.createElement('h3');
-            metricsHeader.className = 'metrics-header';
-            metricsHeader.style.cssText = 'text-align: center; color: #333; margin: 20px 0 15px 0; border-bottom: 2px solid #667eea; padding-bottom: 10px;';
-            metricsHeader.innerHTML = '📊 Overall Performance Metrics <span style="font-size: 0.8em; color: #666; font-weight: normal;">(All Trading Data)</span>';
+            metricsHeader.style.cssText = 'margin: 0; color: #333;';
+            metricsHeader.innerHTML = '📊 Overall Performance Metrics <span id="metricsSubtitle" style="font-size: 0.8em; color: #666; font-weight: normal;">(All Trading Data)</span>';
+            
+            const accountFilterContainer = document.createElement('div');
+            accountFilterContainer.style.cssText = 'display: flex; align-items: center; gap: 10px;';
+            accountFilterContainer.innerHTML = `
+                <label for="overallAccountFilter" style="font-size: 14px; color: #666;">Filter by Account:</label>
+                <select id="overallAccountFilter" onchange="applyOverallAccountFilter()" style="padding: 5px 10px; border: 1px solid #ddd; border-radius: 5px; background: white; font-size: 14px;">
+                    <option value="all">All Accounts</option>
+                </select>
+            `;
+            
+            metricsHeaderContainer.appendChild(metricsHeader);
+            metricsHeaderContainer.appendChild(accountFilterContainer);
             
             const metricsGrid = document.getElementById('metricsGrid');
-            metricsGrid.parentNode.insertBefore(metricsHeader, metricsGrid);
+            metricsGrid.parentNode.insertBefore(metricsHeaderContainer, metricsGrid);
             
             // Display key metrics
             metricsGrid.innerHTML = `
@@ -1872,29 +1900,48 @@
         // Account filtering functionality for commission analysis
         function populateAccountFilter(accounts) {
             console.log('🏦 populateAccountFilter called with:', accounts);
+            
+            // Populate commission analysis account filter
             const accountSelect = document.getElementById('accountFilter');
             console.log('accountFilter element found:', !!accountSelect);
-            if (!accountSelect) {
-                console.error('❌ accountFilter element not found!');
-                return;
+            if (accountSelect) {
+                // Clear existing options except "All Accounts"
+                accountSelect.innerHTML = '<option value="all">All Accounts</option>';
+                console.log('🧹 Cleared accountFilter, current options:', accountSelect.options.length);
+                
+                // Add account options with obfuscated display names
+                accounts.forEach((account, index) => {
+                    console.log(`➕ Adding account ${index + 1}:`, account);
+                    const option = document.createElement('option');
+                    option.value = account.account_num;  // Use real account number for filtering
+                    option.textContent = `Account ${account.account_display} (${account.trade_count} trades)`;  // Use obfuscated display
+                    accountSelect.appendChild(option);
+                    console.log(`✅ Added option: ${option.textContent}`);
+                });
+                
+                console.log('🏦 Final accountFilter options count:', accountSelect.options.length);
+                console.log('🏦 Final options:', Array.from(accountSelect.options).map(opt => opt.textContent));
             }
             
-            // Clear existing options except "All Accounts"
-            accountSelect.innerHTML = '<option value="all">All Accounts</option>';
-            console.log('🧹 Cleared accountFilter, current options:', accountSelect.options.length);
-            
-            // Add account options with obfuscated display names
-            accounts.forEach((account, index) => {
-                console.log(`➕ Adding account ${index + 1}:`, account);
-                const option = document.createElement('option');
-                option.value = account.account_num;  // Use real account number for filtering
-                option.textContent = `Account ${account.account_display} (${account.trade_count} trades)`;  // Use obfuscated display
-                accountSelect.appendChild(option);
-                console.log(`✅ Added option: ${option.textContent}`);
-            });
-            
-            console.log('🏦 Final accountFilter options count:', accountSelect.options.length);
-            console.log('🏦 Final options:', Array.from(accountSelect.options).map(opt => opt.textContent));
+            // Populate overall performance metrics account filter
+            const overallAccountSelect = document.getElementById('overallAccountFilter');
+            console.log('overallAccountFilter element found:', !!overallAccountSelect);
+            if (overallAccountSelect) {
+                // Clear existing options except "All Accounts"
+                overallAccountSelect.innerHTML = '<option value="all">All Accounts</option>';
+                console.log('🧹 Cleared overallAccountFilter, current options:', overallAccountSelect.options.length);
+                
+                // Add account options with obfuscated display names
+                accounts.forEach((account, index) => {
+                    const option = document.createElement('option');
+                    option.value = account.account_num;  // Use real account number for filtering
+                    option.textContent = `Account ${account.account_display} (${account.trade_count} trades)`;  // Use obfuscated display
+                    overallAccountSelect.appendChild(option);
+                    console.log(`✅ Added overall option: ${option.textContent}`);
+                });
+                
+                console.log('🏦 Final overallAccountFilter options count:', overallAccountSelect.options.length);
+            }
         }
         
         async function applyAccountFilter() {
@@ -1942,6 +1989,69 @@
             } catch (err) {
                 console.error('❌ Error filtering by account:', err);
                 chartContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: #dc3545;">Error loading commission analysis. Please try again.</div>';
+            }
+        }
+
+        async function applyOverallAccountFilter() {
+            const overallAccountSelect = document.getElementById('overallAccountFilter');
+            const selectedAccount = overallAccountSelect.value;
+            
+            console.log('🏦 Applying overall account filter:', selectedAccount);
+            
+            // Show loading state
+            showLoading();
+            
+            try {
+                const response = await fetch('/database-analysis-by-account', {
+                    method: 'POST',
+                    headers: {
+                        ...getAuthHeaders(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        account_num: selectedAccount === 'all' ? null : selectedAccount
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    console.log('✅ Success response - calling displayResults with filtered data');
+                    
+                    // Modify data to show it's from database
+                    data.filename = selectedAccount === 'all' ? 'Complete Database' : `Account ${selectedAccount}`;
+                    data.new_trades = 0;
+                    data.updated_trades = 0;
+                    data.duplicate_trades = 0;
+                    
+                    // Update metrics subtitle to show current filter
+                    const metricsSubtitle = document.getElementById('metricsSubtitle');
+                    if (metricsSubtitle) {
+                        metricsSubtitle.textContent = selectedAccount === 'all' 
+                            ? '(All Trading Data)' 
+                            : `(Account ${selectedAccount} Only)`;
+                    }
+                    
+                    displayResults(data, true); // Pass true to indicate this is database view
+                    console.log('✅ Results updated for account filter:', selectedAccount);
+                    
+                    // If daily analysis is currently visible, update it too
+                    if (isDailyViewActive && data.daily_data) {
+                        displayDailyTable(data.daily_data);
+                        console.log('✅ Daily table also updated for account filter');
+                    }
+                } else {
+                    throw new Error(data.detail || 'Failed to filter analysis');
+                }
+            } catch (err) {
+                console.error('❌ Error filtering overall analysis by account:', err);
+                showError(`Error filtering analysis: ${err.message}`);
+            } finally {
+                hideLoading();
             }
         }
 

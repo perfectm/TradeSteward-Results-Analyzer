@@ -1950,6 +1950,93 @@ async def get_filtered_database_analysis(
         logger.error("Error getting filtered database analysis", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error retrieving filtered analysis: {str(e)}")
 
+@app.post("/database-analysis-by-account")
+async def get_database_analysis_by_account(
+    request: AccountFilterRequest,
+    current_user: User = Depends(require_user)
+):
+    """Get complete analysis filtered by account"""
+    try:
+        # Check if there's data in the database for this user
+        total_trades = db.get_trade_count(current_user.user_id)
+        if total_trades == 0:
+            raise HTTPException(status_code=404, detail="No trading data found in database. Please upload a CSV file first.")
+        
+        # Create user-specific analyzer and load data
+        analyzer = TradeStewardAnalyzer(db, current_user.user_id)
+        
+        if analyzer.data is None or analyzer.data.empty:
+            raise HTTPException(status_code=404, detail="No valid trading data found in database.")
+        
+        # Filter data by account if specified
+        if request.account_num:
+            logger.info(f"Filtering analysis by account: {request.account_num}")
+            logger.info(f"Available columns: {list(analyzer.data.columns)}")
+            
+            # Determine account column (same logic as commission chart)
+            account_col = 'AccountNum' if 'AccountNum' in analyzer.data.columns else 'account_num'
+            if account_col not in analyzer.data.columns:
+                logger.error(f"Account column not found. Looking for: AccountNum or account_num")
+                raise HTTPException(status_code=400, detail="No account information found in trading data")
+            
+            logger.info(f"Using account column: {account_col}")
+            logger.info(f"Available account values: {analyzer.data[account_col].unique()}")
+            
+            # Filter the data
+            filtered_data = analyzer.data[analyzer.data[account_col] == request.account_num]
+            logger.info(f"Filtered data count: {len(filtered_data)} (from {len(analyzer.data)} total)")
+            
+            if filtered_data.empty:
+                raise HTTPException(status_code=404, detail=f"No trades found for account {request.account_num}. Available accounts: {list(analyzer.data[account_col].unique())}")
+            
+            # Update analyzer with filtered data
+            analyzer.data = filtered_data
+            analyzer._calculate_daily_pnl()
+        
+        # Get user's initial capital setting for accurate calculations
+        user_initial_capital = db.get_initial_capital(current_user.user_id)
+        analyzer._calculate_metrics(user_initial_capital)
+        
+        # Generate plots for filtered data
+        plot_files = analyzer.generate_plots()
+        
+        # Generate interactive chart data
+        try:
+            interactive_data = analyzer.generate_interactive_chart_data()
+        except Exception as e:
+            logger.error(f"Error generating interactive chart data: {e}", exc_info=True)
+            interactive_data = {}
+        
+        # Get available accounts for filtering
+        available_accounts = db.get_user_accounts(current_user.user_id)
+        
+        # Get daily performance data
+        daily_data = analyzer.get_daily_performance_data()
+        
+        # Prepare response
+        response = {
+            "success": True,
+            "source": "database",
+            "metrics": analyzer.metrics,
+            "plots": plot_files,
+            "interactive_charts": interactive_data,
+            "daily_data": daily_data,
+            "total_trades": len(analyzer.data),
+            "available_accounts": available_accounts,
+            "date_range": f"{analyzer.data['OpenDate'].min().strftime('%Y-%m-%d')} to {analyzer.data['FinalTradeClosedDate'].max().strftime('%Y-%m-%d')}",
+            "total_pnl": float(analyzer.data['TotalNetProfitLoss'].sum()),
+            "account_filter": request.account_num,
+            "filtered": request.account_num is not None
+        }
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error getting filtered database analysis by account", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error retrieving filtered analysis: {str(e)}")
+
 @app.post("/commission-analysis-by-account")
 async def get_commission_analysis_by_account(
     request: AccountFilterRequest,
