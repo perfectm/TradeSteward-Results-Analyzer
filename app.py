@@ -893,6 +893,26 @@ class TradeStewardAnalyzer:
             total_days = 0
             avg_daily_pnl = 0
         
+        # CAGR Calculation
+        cagr = 0.0
+        if trading_days > 0:
+            years = total_days / 365.25  # More accurate than 365
+            if years > 0:
+                # Determine initial capital for CAGR calculation
+                if user_initial_capital and user_initial_capital > 0:
+                    initial_capital_for_cagr = user_initial_capital
+                elif len(cumulative) > 0 and rolling_max[0] != 0:
+                    initial_capital_for_cagr = rolling_max[0]
+                else:
+                    initial_capital_for_cagr = 10000  # Default fallback
+                
+                final_value = initial_capital_for_cagr + total_pnl
+                if initial_capital_for_cagr > 0 and final_value > 0:
+                    cagr = ((final_value / initial_capital_for_cagr) ** (1 / years) - 1) * 100
+                    logger.info(f"CAGR Calculation - Initial: ${initial_capital_for_cagr:.2f}, Final: ${final_value:.2f}, Years: {years:.2f}, CAGR: {cagr:.2f}%")
+                else:
+                    cagr = 0.0
+        
         # Strategy Breakdown with Commission Analysis
         strategy_performance = trades.groupby('Strategy').agg({
             'TotalNetProfitLoss': ['sum', 'mean', 'count'],
@@ -947,7 +967,7 @@ class TradeStewardAnalyzer:
             'win_rate': float(round(win_rate, 2)),
             'avg_winner': float(round(avg_winner, 2)),
             'avg_loser': float(round(avg_loser, 2)),
-            'profit_factor': float(round(abs(avg_winner * len(winning_trades) / (avg_loser * len(losing_trades))), 2)) if len(losing_trades) > 0 and avg_loser != 0 else float('inf'),
+            'cagr': float(round(cagr, 2)),
             'max_drawdown': float(round(max_drawdown, 2)),
             'volatility': float(round(volatility, 2)),
             'sharpe_ratio': float(round(sharpe_ratio, 2)),
@@ -1428,11 +1448,30 @@ class TradeStewardAnalyzer:
                 trade_count = len(day_trades)
                 winning_trades = (day_trades['TotalNetProfitLoss'] > 0).sum()
                 win_rate = round((winning_trades / trade_count * 100) if trade_count > 0 else 0, 1)
-                strategies = day_trades['Strategy'].unique().tolist()
+                
+                # Calculate strategy-specific metrics for this day
+                strategy_metrics = {}
+                for strategy in day_trades['Strategy'].unique():
+                    strategy_trades = day_trades[day_trades['Strategy'] == strategy]
+                    strategy_pnl = strategy_trades['TotalNetProfitLoss'].sum()
+                    strategy_count = len(strategy_trades)
+                    strategy_winners = (strategy_trades['TotalNetProfitLoss'] > 0).sum()
+                    strategy_win_rate = round((strategy_winners / strategy_count * 100) if strategy_count > 0 else 0, 1)
+                    strategy_avg_pnl = round(strategy_trades['TotalNetProfitLoss'].mean(), 2) if strategy_count > 0 else 0
+                    
+                    strategy_metrics[strategy] = {
+                        'pnl': round(strategy_pnl, 2),
+                        'trade_count': strategy_count,
+                        'win_rate': strategy_win_rate,
+                        'avg_pnl': strategy_avg_pnl
+                    }
+                
+                strategies = list(day_trades['Strategy'].unique())
             else:
                 trade_count = 0
                 win_rate = 0
                 strategies = []
+                strategy_metrics = {}
             
             daily_performance.append({
                 'date': date_str,
@@ -1440,7 +1479,8 @@ class TradeStewardAnalyzer:
                 'daily_pnl': round(row['NetPnL'], 2),
                 'cumulative_pnl': round(row['CumulativePnL'], 2),
                 'win_rate': win_rate,
-                'strategies': strategies
+                'strategies': strategies,
+                'strategy_metrics': strategy_metrics
             })
         
         # Sort by date descending (most recent first)

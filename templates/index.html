@@ -435,6 +435,24 @@
                 grid-template-columns: 1fr;
             }
         }
+        
+        /* Table sorting styles */
+        .sort-indicator {
+            color: #999;
+            font-size: 0.8em;
+            margin-left: 5px;
+            opacity: 0.7;
+        }
+        
+        .sort-indicator.active {
+            color: #667eea;
+            opacity: 1;
+        }
+        
+        th:hover .sort-indicator {
+            opacity: 1;
+            color: #667eea;
+        }
     </style>
 </head>
 <body>
@@ -776,13 +794,27 @@
                 <table class="strategy-table" id="strategyTable">
                     <thead>
                         <tr>
-                            <th>Strategy</th>
-                            <th>Total P&L</th>
-                            <th>Total Commissions</th>
-                            <th>Avg P&L</th>
-                            <th>Avg Commission</th>
-                            <th>Trade Count</th>
-                            <th>Avg %</th>
+                            <th onclick="sortStrategyTable(0, 'string')" style="cursor: pointer; user-select: none;">
+                                Strategy <span class="sort-indicator">⇅</span>
+                            </th>
+                            <th onclick="sortStrategyTable(1, 'number')" style="cursor: pointer; user-select: none;">
+                                Total P&L <span class="sort-indicator">⇅</span>
+                            </th>
+                            <th onclick="sortStrategyTable(2, 'number')" style="cursor: pointer; user-select: none;">
+                                Total Commissions <span class="sort-indicator">⇅</span>
+                            </th>
+                            <th onclick="sortStrategyTable(3, 'number')" style="cursor: pointer; user-select: none;">
+                                Avg P&L <span class="sort-indicator">⇅</span>
+                            </th>
+                            <th onclick="sortStrategyTable(4, 'number')" style="cursor: pointer; user-select: none;">
+                                Avg Commission <span class="sort-indicator">⇅</span>
+                            </th>
+                            <th onclick="sortStrategyTable(5, 'number')" style="cursor: pointer; user-select: none;">
+                                Trade Count <span class="sort-indicator">⇅</span>
+                            </th>
+                            <th onclick="sortStrategyTable(6, 'number')" style="cursor: pointer; user-select: none;">
+                                Avg % <span class="sort-indicator">⇅</span>
+                            </th>
                         </tr>
                     </thead>
                     <tbody id="strategyTableBody">
@@ -1339,16 +1371,11 @@
                             </div>
                         </div>`;
                 } else {
-                    cardsHtml = `
-                        <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px; color: white; margin-top: 15px;">
-                            <div style="font-size: 2.5em; font-weight: bold; margin-bottom: 10px;">${data.total_trades || 0}</div>
-                            <div style="font-size: 1.2em;">Total Trades in Database</div>
-                            <div style="font-size: 1em; margin-top: 5px; opacity: 0.9;">Date Range: ${data.date_range || 'N/A'}</div>
-                        </div>`;
+                    cardsHtml = '';
                 }
                 
                 mergeInfo.innerHTML = `
-                    <h4>${isDatabaseView ? '📊 Database Analysis:' : `📊 Upload Results for "${data.filename || 'file'}":`}</h4>
+                    <h4>${isDatabaseView ? '📊 Complete Trading Analysis:' : `📊 Upload Results for "${data.filename || 'file'}":`}</h4>
                     <p style="font-size: 1.1em; color: #2c3e50; margin-bottom: 10px;">${uploadMessage}</p>
                     ${cardsHtml}
                     <p style="margin-top: 15px; font-style: italic; color: #666; text-align: center;">
@@ -1419,10 +1446,10 @@
                     <div class="metric-label">Win Rate</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value ${metrics.profit_factor >= 1 ? 'metric-positive' : 'metric-negative'}">
-                        ${metrics.profit_factor === Infinity ? '∞' : metrics.profit_factor}
+                    <div class="metric-value ${metrics.cagr >= 0 ? 'metric-positive' : 'metric-negative'}">
+                        ${metrics.cagr.toFixed(1)}%
                     </div>
-                    <div class="metric-label">Profit Factor</div>
+                    <div class="metric-label">CAGR</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-value ${metrics.max_drawdown >= 0 ? 'metric-positive' : 'metric-negative'}">
@@ -2098,6 +2125,49 @@
             }
         }
         
+        // Strategy table sorting functionality
+        let strategyTableSortDirection = {};
+        
+        function sortStrategyTable(columnIndex, dataType) {
+            const table = document.getElementById('strategyTable');
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            
+            // Toggle sort direction
+            const sortKey = `col${columnIndex}`;
+            strategyTableSortDirection[sortKey] = !strategyTableSortDirection[sortKey];
+            const ascending = strategyTableSortDirection[sortKey];
+            
+            // Update sort indicators
+            table.querySelectorAll('.sort-indicator').forEach(indicator => {
+                indicator.textContent = '⇅';
+                indicator.classList.remove('active');
+            });
+            
+            const currentIndicator = table.querySelectorAll('.sort-indicator')[columnIndex];
+            currentIndicator.textContent = ascending ? '↑' : '↓';
+            currentIndicator.classList.add('active');
+            
+            // Sort rows
+            rows.sort((a, b) => {
+                let aVal = a.cells[columnIndex].textContent.trim();
+                let bVal = b.cells[columnIndex].textContent.trim();
+                
+                if (dataType === 'number') {
+                    // Remove $ signs, commas, and % signs for numeric comparison
+                    aVal = parseFloat(aVal.replace(/[$,%]/g, '')) || 0;
+                    bVal = parseFloat(bVal.replace(/[$,%]/g, '')) || 0;
+                    return ascending ? aVal - bVal : bVal - aVal;
+                } else {
+                    // String comparison
+                    return ascending ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+                }
+            });
+            
+            // Reappend sorted rows
+            rows.forEach(row => tbody.appendChild(row));
+        }
+        
         function addLineChartOverlay(imgId, data, tooltip) {
             const img = document.getElementById(imgId);
             if (!img) return;
@@ -2568,11 +2638,14 @@
             const tableBody = document.getElementById('dailyTableBody');
             let tableRows = '';
             
-            dailyData.forEach(day => {
+            dailyData.forEach((day, index) => {
                 const pnlClass = day.daily_pnl >= 0 ? 'metric-positive' : 'metric-negative';
+                const hasStrategies = day.strategy_metrics && Object.keys(day.strategy_metrics).length > 0;
+                
+                // Main row
                 tableRows += `
-                    <tr>
-                        <td>${day.date}</td>
+                    <tr onclick="toggleStrategyDetails(${index})" style="cursor: ${hasStrategies ? 'pointer' : 'default'};">
+                        <td>${day.date} ${hasStrategies ? '<span style="color: #667eea; font-size: 0.8em;">▼</span>' : ''}</td>
                         <td>${day.trade_count}</td>
                         <td class="${pnlClass}">$${day.daily_pnl.toLocaleString()}</td>
                         <td class="${pnlClass}">$${day.cumulative_pnl.toLocaleString()}</td>
@@ -2580,9 +2653,57 @@
                         <td>${day.strategies.join(', ')}</td>
                     </tr>
                 `;
+                
+                // Strategy details row (initially hidden)
+                if (hasStrategies) {
+                    tableRows += `
+                        <tr id="strategy-details-${index}" style="display: none; background-color: #f8f9fa;">
+                            <td colspan="6">
+                                <div style="padding: 10px;">
+                                    <strong>Strategy Breakdown:</strong>
+                                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-top: 8px;">
+                    `;
+                    
+                    for (const [strategy, metrics] of Object.entries(day.strategy_metrics)) {
+                        const strategyPnlClass = metrics.pnl >= 0 ? 'metric-positive' : 'metric-negative';
+                        tableRows += `
+                            <div style="background: white; padding: 8px; border-radius: 5px; border-left: 3px solid #667eea;">
+                                <div style="font-weight: bold; margin-bottom: 4px;">${strategy}</div>
+                                <div style="font-size: 0.9em;">
+                                    <div class="${strategyPnlClass}">P&L: $${metrics.pnl.toLocaleString()}</div>
+                                    <div>Trades: ${metrics.trade_count}</div>
+                                    <div>Win Rate: ${metrics.win_rate}%</div>
+                                    <div class="${strategyPnlClass}">Avg: $${metrics.avg_pnl.toFixed(2)}</div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    tableRows += `
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }
             });
             
             tableBody.innerHTML = tableRows;
+        }
+        
+        function toggleStrategyDetails(index) {
+            const detailsRow = document.getElementById(`strategy-details-${index}`);
+            if (detailsRow) {
+                const isHidden = detailsRow.style.display === 'none';
+                detailsRow.style.display = isHidden ? 'table-row' : 'none';
+                
+                // Update arrow indicator
+                const parentRow = detailsRow.previousElementSibling;
+                const arrow = parentRow.querySelector('span');
+                if (arrow) {
+                    arrow.textContent = isHidden ? '▲' : '▼';
+                }
+            }
         }
         
         async function filterDailyData() {
