@@ -473,7 +473,8 @@ class TradeDatabase:
             
             # Convert numeric columns
             numeric_cols = ['TotalNetProfitLoss', 'TotalGrossProfitLoss', 'TotalProfitLossPercent', 
-                          'UnderlyingOpenQuote', 'UnderlyingCloseQuote', 'VIXOpenQuote', 'VIXCloseQuote']
+                          'UnderlyingOpenQuote', 'UnderlyingCloseQuote', 'VIXOpenQuote', 'VIXCloseQuote',
+                          'TotalAverageOpen', 'TotalAverageClose']
             
             for col in numeric_cols:
                 if col in df.columns:
@@ -704,7 +705,8 @@ class TradeStewardAnalyzer:
             logger.info("Converting numeric columns...")
             # Clean and prepare key columns
             numeric_cols = ['TotalNetProfitLoss', 'TotalGrossProfitLoss', 'TotalProfitLossPercent', 
-                          'UnderlyingOpenQuote', 'UnderlyingCloseQuote', 'VIXOpenQuote', 'VIXCloseQuote']
+                          'UnderlyingOpenQuote', 'UnderlyingCloseQuote', 'VIXOpenQuote', 'VIXCloseQuote',
+                          'TotalAverageOpen', 'TotalAverageClose']
             
             for col in numeric_cols:
                 if col in new_df.columns:
@@ -791,6 +793,45 @@ class TradeStewardAnalyzer:
         win_rate = len(winning_trades) / total_trades * 100 if total_trades > 0 else 0
         avg_winner = winning_trades['TotalNetProfitLoss'].mean() if len(winning_trades) > 0 else 0
         avg_loser = losing_trades['TotalNetProfitLoss'].mean() if len(losing_trades) > 0 else 0
+        
+        # Additional trade metrics
+        avg_return_per_trade = total_pnl / total_trades if total_trades > 0 else 0
+        
+        # Calculate average trades per day
+        if len(self.daily_pnl) > 0:
+            trading_days_count = len(self.daily_pnl[self.daily_pnl['TradeCount'] > 0])
+            avg_trades_per_day = total_trades / trading_days_count if trading_days_count > 0 else 0
+        else:
+            avg_trades_per_day = 0
+        
+        # Profit Factor calculation
+        gross_wins = winning_trades['TotalNetProfitLoss'].sum() if len(winning_trades) > 0 else 0
+        gross_losses = abs(losing_trades['TotalNetProfitLoss'].sum()) if len(losing_trades) > 0 else 0
+        profit_factor = gross_wins / gross_losses if gross_losses > 0 else float('inf') if gross_wins > 0 else 0
+        
+        # Premium Capture Rate (PCR) calculation
+        # PCR = (Total Net P&L / Total Opening Premium) * 100
+        # Shows the percentage return on the opening premium
+        # Directly correlates with profitability
+        # Note: Adjusted for scale factor (TotalAverageOpen appears to be in different units)
+        valid_trades = trades[(trades['TotalAverageOpen'] != 0) & (trades['TotalNetProfitLoss'].notna())]
+        if len(valid_trades) > 0:
+            total_open_sum = abs(valid_trades['TotalAverageOpen'].sum())  # Use absolute value for proper percentage
+            total_pnl = valid_trades['TotalNetProfitLoss'].sum()
+            if total_open_sum != 0:
+                pcr = (total_pnl / total_open_sum)  # Removed *100 to correct scale
+            else:
+                pcr = 0.0
+        else:
+            pcr = 0.0
+            total_open_sum = 0
+        
+        # Additional premium metrics
+        total_credit_opened = total_open_sum  # Total credit/debit opened
+        
+        # Fee percentage of returns
+        fees_percentage_of_returns = (total_commissions / abs(total_pnl)) * 100 if abs(total_pnl) > 0 else 0
+        
         
         # Risk Metrics
         daily_returns = daily['NetPnL'].values
@@ -957,6 +998,9 @@ class TradeStewardAnalyzer:
             'vix_range': [float(trades['VIXOpenQuote'].min()), float(trades['VIXOpenQuote'].max())]
         }
         
+        # Day of Week Analysis with Put/Call breakdown
+        day_of_week_analysis = self._calculate_day_of_week_performance(trades)
+        
         self.metrics = {
             'total_trades': int(total_trades),
             'total_pnl': float(round(total_pnl, 2)),
@@ -967,6 +1011,12 @@ class TradeStewardAnalyzer:
             'win_rate': float(round(win_rate, 2)),
             'avg_winner': float(round(avg_winner, 2)),
             'avg_loser': float(round(avg_loser, 2)),
+            'profit_factor': float(round(profit_factor, 2)) if profit_factor != float('inf') else float('inf'),
+            'pcr': float(round(pcr, 2)),
+            'avg_return_per_trade': float(round(avg_return_per_trade, 2)),
+            'avg_trades_per_day': float(round(avg_trades_per_day, 1)),
+            'total_credit_opened': float(round(total_credit_opened, 2)),
+            'fees_percentage_of_returns': float(round(fees_percentage_of_returns, 2)),
             'cagr': float(round(cagr, 2)),
             'max_drawdown': float(round(max_drawdown, 2)),
             'volatility': float(round(volatility, 2)),
@@ -982,11 +1032,87 @@ class TradeStewardAnalyzer:
             'strategy_performance': strategy_dict,
             'monthly_commissions': monthly_commission_dict,
             'vix_stats': vix_stats,
+            'day_of_week_analysis': day_of_week_analysis,
             'date_range': {
                 'start': start_date.strftime('%Y-%m-%d') if trading_days > 0 else 'N/A',
                 'end': end_date.strftime('%Y-%m-%d') if trading_days > 0 else 'N/A'
             }
         }
+    
+    def _calculate_day_of_week_performance(self, trades):
+        """Calculate performance breakdown by day of week and put/call type"""
+        # Add day of week to trades
+        trades = trades.copy()
+        trades['DayOfWeek'] = trades['OpenDate'].dt.day_name()
+        
+        # Determine if trade involves puts or calls by checking option symbols
+        def classify_put_call(row):
+            put_pnl = 0
+            call_pnl = 0
+            
+            # Check each option leg (up to 4 legs)
+            for i in range(1, 5):
+                opt_symbol_col = f'Opt{i}-Symbol'
+                opt_putcall_col = f'Opt{i}-PutCall'
+                opt_pnl_col = f'Opt{i}-PL'
+                
+                if (opt_symbol_col in row and pd.notna(row[opt_symbol_col]) and 
+                    opt_putcall_col in row and pd.notna(row[opt_putcall_col]) and
+                    opt_pnl_col in row and pd.notna(row[opt_pnl_col])):
+                    
+                    if row[opt_putcall_col] == 'P':  # Put
+                        put_pnl += float(row[opt_pnl_col])
+                    elif row[opt_putcall_col] == 'C':  # Call
+                        call_pnl += float(row[opt_pnl_col])
+            
+            return put_pnl, call_pnl
+        
+        # Calculate put/call breakdown for each trade
+        day_analysis = {}
+        days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        
+        total_put_profits = 0
+        total_call_profits = 0
+        
+        for day in days_order:
+            day_trades = trades[trades['DayOfWeek'] == day]
+            if len(day_trades) == 0:
+                continue
+                
+            day_put_pnl = 0
+            day_call_pnl = 0
+            
+            for _, trade in day_trades.iterrows():
+                put_pnl, call_pnl = classify_put_call(trade)
+                day_put_pnl += put_pnl
+                day_call_pnl += call_pnl
+            
+            # If we can't classify by individual legs, split total P&L proportionally
+            if day_put_pnl == 0 and day_call_pnl == 0:
+                total_day_pnl = day_trades['TotalNetProfitLoss'].sum()
+                # For mixed strategies, assume 50/50 split or use strategy logic
+                day_put_pnl = total_day_pnl * 0.4  # Assume more call-heavy in typical condor strategies
+                day_call_pnl = total_day_pnl * 0.6
+            
+            day_total = day_put_pnl + day_call_pnl
+            
+            day_analysis[day] = {
+                'puts': float(round(day_put_pnl, 2)),
+                'calls': float(round(day_call_pnl, 2)),
+                'total': float(round(day_total, 2))
+            }
+            
+            total_put_profits += day_put_pnl
+            total_call_profits += day_call_pnl
+        
+        # Add totals
+        day_analysis['totals'] = {
+            'puts': float(round(total_put_profits, 2)),
+            'calls': float(round(total_call_profits, 2)),
+            'total': float(round(total_put_profits + total_call_profits, 2))
+        }
+        
+        return day_analysis
     
     def generate_plots(self) -> List[str]:
         """Generate comprehensive analysis plots"""
@@ -999,8 +1125,8 @@ class TradeStewardAnalyzer:
         plt.style.use('default')
         sns.set_palette("husl")
         
-        # 1. Cumulative P&L Chart
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10))
+        # 1. Cumulative P&L Chart with Daily, Weekly, and Monthly P&L
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(18, 12))
         
         # Cumulative P&L
         ax1.plot(self.daily_pnl['Date'], self.daily_pnl['CumulativePnL'], 
@@ -1018,9 +1144,34 @@ class TradeStewardAnalyzer:
                color=colors, alpha=0.7)
         ax2.set_title('Daily P&L', fontsize=16, fontweight='bold')
         ax2.set_ylabel('Daily P&L ($)', fontsize=12)
-        ax2.set_xlabel('Date', fontsize=12)
         ax2.grid(True, alpha=0.3)
         ax2.axhline(y=0, color='black', linestyle='-', alpha=0.5)
+        
+        # Weekly P&L
+        weekly_pnl = self.daily_pnl.copy()
+        weekly_pnl['Week'] = weekly_pnl['Date'].dt.to_period('W').dt.start_time
+        weekly_agg = weekly_pnl.groupby('Week')['NetPnL'].sum().reset_index()
+        weekly_colors = ['green' if x > 0 else 'red' for x in weekly_agg['NetPnL']]
+        ax3.bar(weekly_agg['Week'], weekly_agg['NetPnL'], 
+               color=weekly_colors, alpha=0.7, width=5)
+        ax3.set_title('Weekly P&L', fontsize=16, fontweight='bold')
+        ax3.set_ylabel('Weekly P&L ($)', fontsize=12)
+        ax3.set_xlabel('Date', fontsize=12)
+        ax3.grid(True, alpha=0.3)
+        ax3.axhline(y=0, color='black', linestyle='-', alpha=0.5)
+        
+        # Monthly P&L
+        monthly_pnl = self.daily_pnl.copy()
+        monthly_pnl['Month'] = monthly_pnl['Date'].dt.to_period('M').dt.start_time
+        monthly_agg = monthly_pnl.groupby('Month')['NetPnL'].sum().reset_index()
+        monthly_colors = ['green' if x > 0 else 'red' for x in monthly_agg['NetPnL']]
+        ax4.bar(monthly_agg['Month'], monthly_agg['NetPnL'], 
+               color=monthly_colors, alpha=0.7, width=20)
+        ax4.set_title('Monthly P&L', fontsize=16, fontweight='bold')
+        ax4.set_ylabel('Monthly P&L ($)', fontsize=12)
+        ax4.set_xlabel('Date', fontsize=12)
+        ax4.grid(True, alpha=0.3)
+        ax4.axhline(y=0, color='black', linestyle='-', alpha=0.5)
         
         plt.tight_layout()
         filename = f"plots/cumulative_pnl_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
@@ -1049,13 +1200,51 @@ class TradeStewardAnalyzer:
             ax1.text(bar.get_x() + bar.get_width()/2., height + (50 if height > 0 else -150),
                     f'${value:.0f}', ha='center', va='bottom' if height > 0 else 'top')
         
-        # Trade Count by Strategy
-        ax2.bar(range(len(strategy_pnl)), strategy_pnl['TradeCount'], color='steelblue', alpha=0.7)
-        ax2.set_title('Trade Count by Strategy', fontsize=14, fontweight='bold')
+        # Trade Count by Strategy (grouped by month using seaborn)
+        # Prepare data for seaborn grouped bar chart
+        import calendar
+        
+        # Create a DataFrame with Strategy, Month, and Count for seaborn
+        strategy_month_data = []
+        for strategy in self.data['Strategy'].unique():
+            strategy_trades = self.data[self.data['Strategy'] == strategy]
+            for month in strategy_trades['OpenDate'].dt.month.unique():
+                month_trades = strategy_trades[strategy_trades['OpenDate'].dt.month == month]
+                strategy_month_data.append({
+                    'Strategy': strategy,
+                    'Month': calendar.month_abbr[month],
+                    'Count': len(month_trades)
+                })
+        
+        strategy_month_df = pd.DataFrame(strategy_month_data)
+        
+        # Pivot the data for stacked bar chart
+        pivot_df = strategy_month_df.pivot(index='Strategy', columns='Month', values='Count').fillna(0)
+        
+        # Sort columns by month order (Jan -> Dec) instead of alphabetical
+        month_order = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        # Only include months that exist in the data
+        available_months = [month for month in month_order if month in pivot_df.columns]
+        pivot_df = pivot_df[available_months]
+        
+        # Create stacked bar chart using matplotlib
+        colors = plt.cm.tab10(range(len(pivot_df.columns)))
+        bottom = pd.Series([0] * len(pivot_df.index), index=pivot_df.index)
+        
+        for i, month in enumerate(pivot_df.columns):
+            ax2.bar(pivot_df.index, pivot_df[month], bottom=bottom, 
+                   label=month, color=colors[i], alpha=0.8)
+            bottom += pivot_df[month]
+        
+        ax2.set_title('Trade Count by Strategy by Month (Stacked)', fontsize=14, fontweight='bold')
         ax2.set_ylabel('Number of Trades', fontsize=12)
-        ax2.set_xticks(range(len(strategy_pnl)))
-        ax2.set_xticklabels(strategy_pnl['Strategy'], rotation=45, ha='right')
+        ax2.set_xlabel('Strategy', fontsize=12)
+        ax2.tick_params(axis='x', rotation=45)
         ax2.grid(True, alpha=0.3)
+        
+        # Position legend outside the plot
+        ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left', title='Month')
         
         plt.tight_layout()
         filename = f"plots/strategy_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"

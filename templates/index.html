@@ -840,6 +840,14 @@
                 <!-- Charts will be populated by JavaScript -->
             </div>
             
+            <!-- Day of Week Analysis Section -->
+            <div class="day-of-week-section" id="dayOfWeekSection" style="margin: 40px 0; padding: 30px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 15px; box-shadow: 0 8px 25px rgba(0,0,0,0.1);">
+                <h3 style="text-align: center; color: #333; margin-bottom: 30px; font-size: 24px; font-weight: bold;">📅 Total Profits by Entry Day</h3>
+                <div id="dayOfWeekTable">
+                    <!-- Day of week analysis will be populated by JavaScript -->
+                </div>
+            </div>
+            
             <!-- Daily Analysis Section (Hidden by default) -->
             <div id="dailyAnalysisSection" style="display: none;">
                 <h2 style="text-align: center; margin-bottom: 30px; color: #333;">📅 Daily Performance Analysis</h2>
@@ -1434,10 +1442,8 @@
             // Display key metrics
             metricsGrid.innerHTML = `
                 <div class="metric-card">
-                    <div class="metric-value ${metrics.total_pnl >= 0 ? 'metric-positive' : 'metric-negative'}">
-                        $${metrics.total_pnl.toLocaleString()}
-                    </div>
-                    <div class="metric-label">Total Net P&L</div>
+                    <div class="metric-value">${metrics.total_trades}</div>
+                    <div class="metric-label">Total Trades</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-value ${metrics.total_gross_pnl >= 0 ? 'metric-positive' : 'metric-negative'}">
@@ -1446,14 +1452,22 @@
                     <div class="metric-label">Total Gross P&L</div>
                 </div>
                 <div class="metric-card">
+                    <div class="metric-value ${metrics.total_pnl >= 0 ? 'metric-positive' : 'metric-negative'}">
+                        $${metrics.total_pnl.toLocaleString()}
+                    </div>
+                    <div class="metric-label">Total Net P&L</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value ${(metrics.pcr || 0) >= 0 ? 'metric-positive' : 'metric-negative'}">
+                        ${(metrics.pcr || 0).toFixed(1)}%
+                    </div>
+                    <div class="metric-label">Premium Capture Rate</div>
+                </div>
+                <div class="metric-card">
                     <div class="metric-value metric-negative">
                         $${(metrics.total_commissions || 0).toLocaleString()}
                     </div>
                     <div class="metric-label">Total Commissions</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-value">${metrics.total_trades}</div>
-                    <div class="metric-label">Total Trades</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-value metric-negative">
@@ -1468,6 +1482,12 @@
                     <div class="metric-label">Commission %</div>
                 </div>
                 <div class="metric-card">
+                    <div class="metric-value ${metrics.max_drawdown >= 0 ? 'metric-positive' : 'metric-negative'}">
+                        $${metrics.max_drawdown.toLocaleString()}
+                    </div>
+                    <div class="metric-label">Max Drawdown</div>
+                </div>
+                <div class="metric-card">
                     <div class="metric-value ${metrics.win_rate >= 50 ? 'metric-positive' : 'metric-negative'}">
                         ${metrics.win_rate}%
                     </div>
@@ -1480,10 +1500,16 @@
                     <div class="metric-label">CAGR</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value ${metrics.max_drawdown >= 0 ? 'metric-positive' : 'metric-negative'}">
-                        $${metrics.max_drawdown.toLocaleString()}
+                    <div class="metric-value metric-positive">
+                        $${metrics.avg_winner.toLocaleString()}
                     </div>
-                    <div class="metric-label">Max Drawdown</div>
+                    <div class="metric-label">Avg Winner</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value metric-negative">
+                        $${metrics.avg_loser.toLocaleString()}
+                    </div>
+                    <div class="metric-label">Avg Loser</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-value ${metrics.sharpe_ratio >= 0 ? 'metric-positive' : 'metric-negative'}">
@@ -1510,16 +1536,28 @@
                     <div class="metric-label">UPI <span style="font-size: 0.8em; color: #999;">(RF: ${metrics.risk_free_rate ? (metrics.risk_free_rate * 100).toFixed(1) : 4.3}%)</span></div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value metric-positive">
-                        $${metrics.avg_winner.toLocaleString()}
+                    <div class="metric-value ${(metrics.avg_return_per_trade || 0) >= 0 ? 'metric-positive' : 'metric-negative'}">
+                        $${(metrics.avg_return_per_trade || 0).toLocaleString()}
                     </div>
-                    <div class="metric-label">Avg Winner</div>
+                    <div class="metric-label">Avg Return per Trade</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">
+                        ${(metrics.avg_trades_per_day || 0).toFixed(1)}
+                    </div>
+                    <div class="metric-label">Avg Trades per Day</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">
+                        $${(metrics.total_credit_opened || 0).toLocaleString()}
+                    </div>
+                    <div class="metric-label">Total Credit Opened</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-value metric-negative">
-                        $${metrics.avg_loser.toLocaleString()}
+                        ${(metrics.fees_percentage_of_returns || 0).toFixed(1)}%
                     </div>
-                    <div class="metric-label">Avg Loser</div>
+                    <div class="metric-label">Fees % of Returns</div>
                 </div>
             `;
             
@@ -1560,6 +1598,9 @@
                 `;
             }
             strategyTableBody.innerHTML = strategyRows;
+            
+            // Display day of week analysis
+            displayDayOfWeekAnalysis(metrics.day_of_week_analysis || {});
             
             // Display charts with hybrid approach (static images + interactive overlays)
             const chartsSection = document.getElementById('chartsSection');
@@ -2482,6 +2523,7 @@
                     { element: document.getElementById('metricsGrid')?.parentNode, name: 'metrics grid parent' },
                     { element: document.getElementById('strategySection'), name: 'strategy section' },
                     { element: document.getElementById('chartsSection'), name: 'charts section' },
+                    { element: document.getElementById('dayOfWeekSection'), name: 'day of week section' },
                     { element: document.getElementById('dailyAnalysisBtn'), name: 'daily analysis button' }
                 ];
                 
@@ -2531,7 +2573,18 @@
                     
                 } catch (error) {
                     console.error('❌ Failed to load daily analysis data:', error);
-                    showError('Failed to load daily analysis. The overall data is available, but daily breakdown could not be generated.');
+                    let errorMsg = 'Failed to load daily analysis. ';
+                    if (error.message.includes('Authentication')) {
+                        errorMsg += 'Please refresh the page and try again.';
+                    } else if (error.message.includes('404')) {
+                        errorMsg += 'No trading data found in database.';
+                    } else if (error.message.includes('500')) {
+                        errorMsg += 'Server error occurred.';
+                    } else {
+                        errorMsg += 'The overall data is available, but daily breakdown could not be generated.';
+                    }
+                    errorMsg += ` (${error.message})`;
+                    showError(errorMsg);
                 }
                 
                 // Scroll to daily analysis section
@@ -2578,6 +2631,7 @@
             const metricsGridParent = document.getElementById('metricsGrid').parentNode;
             const strategySection = document.getElementById('strategySection');
             const chartsSection = document.getElementById('chartsSection');
+            const dayOfWeekSection = document.getElementById('dayOfWeekSection');
             const dailyAnalysisBtn = document.getElementById('dailyAnalysisBtn');
             
             // Remove any !important hidden styles and show elements
@@ -2592,6 +2646,10 @@
             if (chartsSection) {
                 chartsSection.style.setProperty('display', 'block', 'important');
                 chartsSection.style.setProperty('visibility', 'visible', 'important');
+            }
+            if (dayOfWeekSection) {
+                dayOfWeekSection.style.setProperty('display', 'block', 'important');
+                dayOfWeekSection.style.setProperty('visibility', 'visible', 'important');
             }
             if (dailyAnalysisBtn) {
                 dailyAnalysisBtn.style.setProperty('display', 'inline-block', 'important');
@@ -2928,6 +2986,7 @@
                         { element: document.getElementById('metricsGrid')?.parentNode, name: 'metrics grid parent' },
                         { element: document.getElementById('strategySection'), name: 'strategy section' },
                         { element: document.getElementById('chartsSection'), name: 'charts section' },
+                        { element: document.getElementById('dayOfWeekSection'), name: 'day of week section' },
                         { element: document.getElementById('dailyAnalysisBtn'), name: 'daily analysis button' }
                     ];
                     
@@ -2986,6 +3045,7 @@
                 document.getElementById('metricsGrid')?.parentNode,
                 document.getElementById('strategySection'),
                 document.getElementById('chartsSection'),
+                document.getElementById('dayOfWeekSection'),
                 document.getElementById('dailyAnalysisBtn')
             ];
             
@@ -3037,6 +3097,78 @@
                     console.log('🔧 Results offsetHeight:', results.offsetHeight);
                 }
             }, 100);
+        }
+        
+        function displayDayOfWeekAnalysis(dayData) {
+            const dayOfWeekTable = document.getElementById('dayOfWeekTable');
+            if (!dayData || Object.keys(dayData).length === 0) {
+                dayOfWeekTable.innerHTML = '<p style="text-align: center; color: #666;">No day of week data available</p>';
+                return;
+            }
+            
+            const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+            const dayAbbrevs = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+            
+            let tableHtml = `
+                <table style="width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+                    <thead>
+                        <tr style="background: linear-gradient(45deg, #667eea, #764ba2); color: white;">
+                            <th style="padding: 15px; text-align: left; font-weight: bold; font-size: 16px;">Day</th>
+                            <th style="padding: 15px; text-align: right; font-weight: bold; font-size: 16px;">Puts</th>
+                            <th style="padding: 15px; text-align: right; font-weight: bold; font-size: 16px;">Calls</th>
+                            <th style="padding: 15px; text-align: right; font-weight: bold; font-size: 16px;">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            // Add each day row
+            days.forEach((day, index) => {
+                const dayAbbrev = dayAbbrevs[index];
+                const dayDataItem = dayData[day] || { puts: 0, calls: 0, total: 0 };
+                
+                const putsClass = dayDataItem.puts >= 0 ? 'metric-positive' : 'metric-negative';
+                const callsClass = dayDataItem.calls >= 0 ? 'metric-positive' : 'metric-negative';
+                const totalClass = dayDataItem.total >= 0 ? 'metric-positive' : 'metric-negative';
+                
+                tableHtml += `
+                    <tr style="border-bottom: 1px solid #e9ecef;">
+                        <td style="padding: 12px 15px; font-weight: bold; font-size: 15px;">${dayAbbrev}</td>
+                        <td style="padding: 12px 15px; text-align: right; font-weight: bold;" class="${putsClass}">
+                            $${dayDataItem.puts.toLocaleString()}
+                        </td>
+                        <td style="padding: 12px 15px; text-align: right; font-weight: bold;" class="${callsClass}">
+                            $${dayDataItem.calls.toLocaleString()}
+                        </td>
+                        <td style="padding: 12px 15px; text-align: right; font-weight: bold;" class="${totalClass}">
+                            $${dayDataItem.total.toLocaleString()}
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            // Add totals row
+            const totals = dayData.totals || { puts: 0, calls: 0, total: 0 };
+            const totalPutsClass = totals.puts >= 0 ? 'metric-positive' : 'metric-negative';
+            const totalCallsClass = totals.calls >= 0 ? 'metric-positive' : 'metric-negative';
+            const grandTotalClass = totals.total >= 0 ? 'metric-positive' : 'metric-negative';
+            
+            tableHtml += `
+                    </tbody>
+                    <tfoot>
+                        <tr style="background: #f8f9fa; border-top: 2px solid #667eea;">
+                            <td style="padding: 15px; font-weight: bold; font-size: 16px; color: #333;">
+                                <strong>Total Put Profits: $${totals.puts.toLocaleString()}</strong>
+                            </td>
+                            <td colspan="3" style="padding: 15px; text-align: right; font-weight: bold; font-size: 16px; color: #333;">
+                                <strong>Total Call Profits: $${totals.calls.toLocaleString()}</strong>
+                            </td>
+                        </tr>
+                    </tfoot>
+                </table>
+            `;
+            
+            dayOfWeekTable.innerHTML = tableHtml;
         }
     </script>
 </body>

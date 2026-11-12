@@ -5,14 +5,15 @@ This script tests the core analyzer functionality with the sample CSV file.
 """
 
 import pandas as pd
-from app import TradeStewardAnalyzer
+from app import TradeStewardAnalyzer, TradeDatabase
 import os
 
 def test_analyzer():
     """Test the TradeSteward analyzer with the sample CSV file"""
     
-    # Initialize analyzer
-    analyzer = TradeStewardAnalyzer()
+    # Initialize database and analyzer (using test user ID)
+    db = TradeDatabase("test_database.db")
+    analyzer = TradeStewardAnalyzer(db, user_id=1)
     
     # Check if the CSV file exists
     csv_file = "tradeSteward-performanceLogs-1753563010.csv"
@@ -64,6 +65,11 @@ def test_analyzer():
         print("📊 Key Metrics:")
         print(f"   • Win Rate: {metrics['win_rate']:.1f}%")
         print(f"   • Profit Factor: {metrics['profit_factor']}")
+        print(f"   • Premium Capture Rate: {metrics['pcr']:.1f}%")
+        print(f"   • Average Return per Trade: ${metrics['avg_return_per_trade']:,.2f}")
+        print(f"   • Average Trades per Day: {metrics['avg_trades_per_day']:.1f}")
+        print(f"   • Total Credit Opened: ${metrics['total_credit_opened']:,.2f}")
+        print(f"   • Fees % of Returns: {metrics['fees_percentage_of_returns']:.2f}%")
         print(f"   • Max Drawdown: ${metrics['max_drawdown']:,.2f}")
         print(f"   • Sharpe Ratio: {metrics['sharpe_ratio']:.2f}")
         print(f"   • Average Winner: ${metrics['avg_winner']:,.2f}")
